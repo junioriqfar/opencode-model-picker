@@ -14,7 +14,7 @@ import {
 } from '@clack/prompts'
 import pc from 'picocolors'
 import { loadAppConfig, saveAppConfig, upsertProvider } from './config.js'
-import { listModels, testModel } from './provider.js'
+import { listModels, testModel, sleep } from './provider.js'
 import { attachScores, sortByScore } from './scoring.js'
 import {
   buildModelsBlock,
@@ -105,18 +105,35 @@ async function main() {
     return
   }
 
+  // ---------- 3b. Pengaturan tes ----------
+  const timeoutSec = await text({
+    message: 'Timeout per model (detik):',
+    initialValue: '15',
+    validate: (v) => {
+      const n = Number(v)
+      if (!Number.isInteger(n) || n < 1 || n > 300)
+        return 'Masukkan angka bulat antara 1-300'
+      return undefined
+    },
+  })
+  if (isCancel(timeoutSec)) return handleCancel()
+  const timeoutMs = Number(timeoutSec) * 1000
+
   // ---------- 4. Tes akses ----------
   const results = []
   s.start('Mengecek akses model (mungkin butuh beberapa saat)...')
-  for (const m of toTest) {
+  for (let i = 0; i < toTest.length; i++) {
+    const m = toTest[i]
     const r = await testModel({
       baseURL: provider.baseURL,
       apiKey: provider.apiKey,
       model: m.id,
+      timeoutMs,
     })
     results.push({ model: m, result: r })
     if (r.ok) s.message(`${m.id} ${pc.green('✓')}`)
-    else s.message(`${m.id} ${pc.red('✗')} — ${r.message}`)
+    else s.message(`${m.id} ${pc.red('✗')} — ${r.message ?? 'Error tak dikenal'}`)
+    if (i < toTest.length - 1) await sleep(500)
   }
   s.stop('Pengecekan selesai.')
 
@@ -136,14 +153,14 @@ async function main() {
   if (warnModels.length > 0) {
     log.warn(
       warnModels
-        .map((r) => `  ! ${r.model.id} — ${r.result.message}`)
+        .map((r) => `  ! ${r.model.id} — ${r.result.message ?? 'Error tak dikenal'}`)
         .join('\n'),
     )
   }
   if (deadModels.length > 0) {
     log.error(
       deadModels
-        .map((r) => `  ✗ ${r.model.id} — ${r.result.message}`)
+        .map((r) => `  ✗ ${r.model.id} — ${r.result.message ?? 'Error tak dikenal'}`)
         .join('\n'),
     )
   }

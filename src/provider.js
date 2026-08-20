@@ -1,6 +1,10 @@
 const TEST_MESSAGE = 'Say hi'
 const TEST_MAX_TOKENS = 16
-const TEST_TIMEOUT = 60000
+const TEST_TIMEOUT = 15000
+
+export function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
 
 function normalizeModelURL(baseURL) {
   let url = baseURL.trim()
@@ -62,66 +66,113 @@ function normalizeModel(m) {
   }
 }
 
-export async function testModel({ baseURL, apiKey, model, timeoutMs = TEST_TIMEOUT }) {
+function looksLikeHtml(text) {
+  const t = (text ?? '').trim().toLowerCase()
+  return (
+    t.startsWith('<!doctype') ||
+    t.startsWith('<html') ||
+    t.startsWith('<?xml') ||
+    t.includes('content-type') && t.includes('text/html')
+  )
+}
+
+export async function testModel({
+  baseURL,
+  apiKey,
+  model,
+  timeoutMs = TEST_TIMEOUT,
+  retryOn429 = true,
+}) {
   const url = `${normalizeModelURL(baseURL)}/chat/completions`
-  try {
-    const res = await fetchWithTimeout(
-      url,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model,
-          messages: [{ role: 'user', content: TEST_MESSAGE }],
-          max_tokens: TEST_MAX_TOKENS,
-          stream: false,
-        }),
-      },
-      timeoutMs,
-    )
-    const text = await res.text()
-    let json = null
+
+  const attempt = async () => {
     try {
-      json = text ? JSON.parse(text) : null
-    } catch {
-      json = null
-    }
+      const res = await fetchWithTimeout(
+        url,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model,
+            messages: [{ role: 'user', content: TEST_MESSAGE }],
+            max_tokens: TEST_MAX_TOKENS,
+            stream: false,
+          }),
+        },
+        timeoutMs,
+      )
+      const contentType = res.headers.get('content-type') ?? ''
+      const text = await res.text()
 
-    if (!res.ok) {
-      return classifyError(model, res.status, json, text)
-    }
-
-    const content = json?.choices?.[0]?.message?.content ?? null
-    if (content === null || content === undefined) {
-      return {
-        ok: true,
-        status: res.status,
-        warning: 'Respons kosong (mungkin token habis untuk reasoning)',
-        detail: text.slice(0, 200),
+      let json = null
+      if (contentType.includes('application/json') || text.trim().startsWith('{')) {
+        try {
+          json = text ? JSON.parse(text) : null
+        } catch {
+          json = null
+        }
       }
-    }
-    return { ok: true, status: res.status, warning: null, detail: null }
-  } catch (err) {
-    if (err.name === 'AbortError') {
+
+      if (looksLikeHtml(text)) {
+        return {
+          ok: false,
+          status: res.status,
+          error: 'html',
+          message: 'Server mengembalikan halaman HTML (bukan API JSON)',
+          detail: text.slice(0, 200),
+          dead: false,
+        }
+      }
+
+      if (!res.ok) {
+        return classifyError(model, res.status, json, text)
+      }
+
+      // Respons 200 tapi bentuknya error (mis. {"error":{...}})
+      if (json && json.error && !json.choices) {
+        return classifyError(model, 200, json, text)
+      }
+
+      const content = json?.choices?.[0]?.message?.content ?? null
+      if (content === null || content === undefined) {
+        return {
+          ok: true,
+          status: res.status,
+          message: 'Respons kosong (mungkin token habis untuk reasoning)',
+          warning: true,
+          detail: text.slice(0, 200),
+        }
+      }
+      return { ok: true, status: res.status, message: 'OK', warning: false, detail: null }
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        return {
+          ok: false,
+          status: 'timeout',
+          error: 'timeout',
+          message: `Timeout setelah ${Math.round(timeoutMs / 1000)} detik`,
+          dead: false,
+        }
+      }
       return {
         ok: false,
-        status: 'timeout',
-        error: 'timeout',
-        message: `Timeout setelah ${timeoutMs / 1000}s`,
+        status: 'network',
+        error: 'network',
+        message: `Network error: ${err.message ?? 'tak dikenal'}`,
         dead: false,
       }
     }
-    return {
-      ok: false,
-      status: 'network',
-      error: err.message,
-      message: `Network error: ${err.message}`,
-      dead: false,
-    }
   }
+
+  let result = await attempt()
+  if (!result.ok && result.error === 'ratelimit' && retryOn429) {
+    await sleep(1500)
+    result = await attempt()
+  }
+  return result
 }
 
 function classifyError(model, status, json, text) {

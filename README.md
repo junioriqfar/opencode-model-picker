@@ -48,10 +48,11 @@ Catatan arm64:
 1. **Provider** — pilih provider tersimpan atau masukkan `baseURL` + `apiKey` baru.
 2. **Ambil model** — aplikasi memanggil `GET {baseURL}/v1/models`.
 3. **Pilih model** — tandai model yang ingin dicek (bisa semua).
-4. **Tes akses** — setiap model diuji dengan request kecil. Model yang mati (410 end-of-life, 404 tidak ditemukan, timeout, rate-limit) dideteksi otomatis.
-5. **Skor otomatis** — model yang berfungsi diurutkan berdasarkan skor kemampuan coding (reasoning, tools, konteks, heuristik nama).
-6. **Edit manual** — ubah urutan sesuai keinginan.
-7. **Simpan** — tulis ke `~/.config/opencode/opencode.jsonc` (macOS/Linux) atau `%APPDATA%\opencode\` (Windows), dengan merge aman yang mempertahankan konfigurasi lain.
+4. **Atur timeout** — batas waktu menunggu response tiap model, default **15 detik** (bisa diubah 1–300 detik).
+5. **Tes akses** — setiap model diuji dengan request kecil. Model yang mati (410 end-of-life, 404 tidak ditemukan, timeout, rate-limit, respons HTML) dideteksi otomatis; rate-limit dicoba ulang sekali otomatis. Terdapat jeda 500ms antar model untuk mengurangi burst rate-limit (terpisah dari pengaturan timeout).
+6. **Skor otomatis** — model yang berfungsi diurutkan berdasarkan skor kemampuan coding (reasoning, tools, konteks, heuristik nama).
+7. **Edit manual** — ubah urutan sesuai keinginan.
+8. **Simpan** — tulis ke `~/.config/opencode/opencode.jsonc` (macOS/Linux) atau `%APPDATA%\opencode\` (Windows), dengan merge aman yang mempertahankan konfigurasi lain.
 
 ## Struktur
 
