@@ -13,68 +13,68 @@ import {
   confirm,
 } from '@clack/prompts'
 import pc from 'picocolors'
-import { loadAppConfig, saveAppConfig, upsertProvider } from './config.js'
+import {
+  loadAppConfig,
+  saveAppConfig,
+  upsertProvider,
+  updateProvider,
+  deleteProvider,
+} from './config.js'
 import { listModels, testModel, sleep } from './provider.js'
 import { attachScores, sortByScore } from './scoring.js'
 import {
   buildModelsBlock,
   writeOpencodeConfig,
   readOpencodeConfig,
+  providerExists,
 } from './opencode.js'
 import { APP_NAME } from './utils.js'
 
 async function main() {
   intro(pc.bold(pc.cyan(` ${APP_NAME} — ambil, tes & urutkan model untuk OpenCode`)))
 
-  const config = loadAppConfig()
+  let config = loadAppConfig()
 
   // ---------- 1. Provider ----------
-  const useExisting =
-    config.providers.length > 0 &&
-    (await confirm({
-      message: `Gunakan provider tersimpan (${config.providers
-        .map((p) => p.name)
-        .join(', ')})?`,
-      initialValue: true,
-    }))
-  if (isCancel(useExisting)) return handleCancel()
-
   let provider
-  if (useExisting) {
-    const names = config.providers.map((p, i) => ({
-      value: i,
-      label: `${p.name} — ${p.baseURL}`,
-    }))
-    const picked = await select({
-      message: 'Pilih provider:',
-      options: names,
-    })
-    if (isCancel(picked)) return handleCancel()
-    provider = { ...config.providers[picked] }
-  } else {
-    const baseURL = await text({
-      message: 'Base URL provider (mis. https://9router.penjualanku.web.id/v1):',
-      placeholder: 'https://...',
-      validate: (v) => (v && v.trim() ? undefined : 'Base URL wajib diisi'),
-    })
-    if (isCancel(baseURL)) return handleCancel()
+  while (true) {
+    config = loadAppConfig()
+    const hasSaved = config.providers.length > 0
+    const options = []
+    if (hasSaved) options.push({ value: 'use', label: 'Gunakan provider tersimpan' })
+    if (hasSaved) options.push({ value: 'manage', label: 'Kelola provider tersimpan' })
+    options.push({ value: 'new', label: 'Tambah provider baru' })
+    if (hasSaved) options.push({ value: 'exit', label: pc.red('Keluar') })
 
-    const apiKey = await password({
-      message: 'API key provider:',
-      validate: (v) => (v && v.trim() ? undefined : 'API key wajib diisi'),
+    const startChoice = await select({
+      message: 'Pilih aksi:',
+      options,
     })
-    if (isCancel(apiKey)) return handleCancel()
+    if (isCancel(startChoice)) return handleCancel()
+    if (startChoice === 'exit') {
+      outro(pc.yellow('Selesai.'))
+      return
+    }
+    if (startChoice === 'manage') {
+      await manageProviders()
+      continue
+    }
 
-    const name = await text({
-      message: 'Nama provider untuk opencode (mis. 9Router, DeepSeek, MyAPI):',
-      placeholder: '9Router',
-      validate: (v) => (v && v.trim() ? undefined : 'Nama wajib diisi'),
-    })
-    if (isCancel(name)) return handleCancel()
-
-    provider = { name: name.trim(), baseURL: baseURL.trim(), apiKey: apiKey.trim() }
-    upsertProvider(config, provider)
-    saveAppConfig(config)
+    if (startChoice === 'use') {
+      const names = config.providers.map((p, i) => ({
+        value: i,
+        label: `${p.name} — ${p.baseURL}`,
+      }))
+      const picked = await select({
+        message: 'Pilih provider:',
+        options: names,
+      })
+      if (isCancel(picked)) return handleCancel()
+      provider = { ...config.providers[picked] }
+    } else {
+      provider = await addNewProvider(config)
+    }
+    break
   }
 
   // ---------- 2. Ambil model ----------
@@ -272,14 +272,26 @@ async function main() {
   log.message(pc.bold('Preview blok provider yang akan ditulis:'))
   log.message(pc.dim(preview))
 
+  const key = providerKey.trim()
+  const alreadyExists = providerExists(key)
+  if (alreadyExists) {
+    log.warn(
+      `Provider "${key}" sudah ada di opencode.jsonc. Menyimpan akan MENGHAPUS semua model yang ada di provider tersebut dan menggantinya dengan daftar saat ini.`,
+    )
+  }
+
   const save = await confirm({
-    message: 'Simpan ke konfigurasi opencode?',
+    message: alreadyExists
+      ? `Ganti provider "${key}" (hapus ${Object.keys(
+          readOpencodeConfig().config.provider?.[key]?.models ?? {},
+        ).length} model lama) dan tulis ${ordered.length} model baru?`
+      : 'Simpan ke konfigurasi opencode?',
     initialValue: true,
   })
   if (isCancel(save)) return handleCancel()
 
   if (save) {
-    writeOpencodeConfig(providerKey.trim(), providerBlock)
+    writeOpencodeConfig(key, providerBlock)
     outro(
       pc.green(
         `Tersimpan! Restart opencode, lalu pilih model via /models.`,
@@ -287,6 +299,109 @@ async function main() {
     )
   } else {
     outro(pc.yellow('Batal disimpan.'))
+  }
+}
+
+async function addNewProvider(config) {
+  const baseURL = await text({
+    message: 'Base URL provider (mis. https://9router.penjualanku.web.id/v1):',
+    placeholder: 'https://...',
+    validate: (v) => (v && v.trim() ? undefined : 'Base URL wajib diisi'),
+  })
+  if (isCancel(baseURL)) return handleCancel()
+
+  const apiKey = await password({
+    message: 'API key provider:',
+    validate: (v) => (v && v.trim() ? undefined : 'API key wajib diisi'),
+  })
+  if (isCancel(apiKey)) return handleCancel()
+
+  const name = await text({
+    message: 'Nama provider untuk opencode (mis. 9Router, DeepSeek, MyAPI):',
+    placeholder: '9Router',
+    validate: (v) => (v && v.trim() ? undefined : 'Nama wajib diisi'),
+  })
+  if (isCancel(name)) return handleCancel()
+
+  const provider = { name: name.trim(), baseURL: baseURL.trim(), apiKey: apiKey.trim() }
+  upsertProvider(config, provider)
+  saveAppConfig(config)
+  return provider
+}
+
+async function manageProviders() {
+  let config = loadAppConfig()
+  while (config.providers.length > 0) {
+    const options = config.providers.map((p, i) => ({
+      value: `edit:${i}`,
+      label: `${p.name} — ${p.baseURL}`,
+    }))
+    options.push({ value: 'done', label: pc.green('Selesai') })
+
+    const pick = await select({
+      message: 'Pilih provider untuk dikelola:',
+      options,
+    })
+    if (isCancel(pick)) return handleCancel()
+    if (pick === 'done') break
+
+    const idx = Number(pick.split(':')[1])
+    const action = await select({
+      message: `Kelola "${config.providers[idx].name}":`,
+      options: [
+        { value: 'rename', label: 'Ubah nama' },
+        { value: 'url', label: 'Ubah base URL' },
+        { value: 'apikey', label: 'Ubah API key' },
+        { value: 'delete', label: pc.red('Hapus provider') },
+        { value: 'back', label: 'Kembali' },
+      ],
+    })
+    if (isCancel(action)) return handleCancel()
+
+    if (action === 'back') continue
+
+    if (action === 'rename') {
+      const name = await text({
+        message: 'Nama baru:',
+        initialValue: config.providers[idx].name,
+        validate: (v) => (v && v.trim() ? undefined : 'Nama wajib diisi'),
+      })
+      if (isCancel(name)) return handleCancel()
+      updateProvider(config, idx, { name: name.trim() })
+      saveAppConfig(config)
+      log.success(`Nama diubah menjadi "${name.trim()}"`)
+    } else if (action === 'url') {
+      const url = await text({
+        message: 'Base URL baru:',
+        initialValue: config.providers[idx].baseURL,
+        validate: (v) => (v && v.trim() ? undefined : 'Base URL wajib diisi'),
+      })
+      if (isCancel(url)) return handleCancel()
+      updateProvider(config, idx, { baseURL: url.trim() })
+      saveAppConfig(config)
+      log.success('Base URL diperbarui')
+    } else if (action === 'apikey') {
+      const key = await password({
+        message: 'API key baru:',
+        validate: (v) => (v && v.trim() ? undefined : 'API key wajib diisi'),
+      })
+      if (isCancel(key)) return handleCancel()
+      updateProvider(config, idx, { apiKey: key.trim() })
+      saveAppConfig(config)
+      log.success('API key diperbarui')
+    } else if (action === 'delete') {
+      const ok = await confirm({
+        message: `Hapus provider "${config.providers[idx].name}"?`,
+        initialValue: false,
+      })
+      if (isCancel(ok)) return handleCancel()
+      if (ok) {
+        deleteProvider(config, idx)
+        saveAppConfig(config)
+        log.success('Provider dihapus')
+      }
+    }
+    config = loadAppConfig()
   }
 }
 

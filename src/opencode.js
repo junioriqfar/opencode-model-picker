@@ -48,6 +48,11 @@ export function buildModelsBlock(orderedModels, { paidIds = [], markPaid = false
   return models
 }
 
+export function providerExists(providerKey) {
+  const { config } = readOpencodeConfig()
+  return !!(config.provider && config.provider[providerKey])
+}
+
 export function writeOpencodeConfig(providerKey, providerBlock) {
   const { config, path, exists } = readOpencodeConfig()
   if (!config.provider) config.provider = {}

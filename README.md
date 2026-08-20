@@ -45,7 +45,7 @@ Catatan arm64:
 
 ## Alur
 
-1. **Provider** — pilih provider tersimpan atau masukkan `baseURL` + `apiKey` baru.
+1. **Aksi awal** — pilih antara *Gunakan provider tersimpan*, *Kelola provider tersimpan* (ubah nama/base URL/API key, hapus), *Tambah provider baru*, atau *Keluar*.
 2. **Ambil model** — aplikasi memanggil `GET {baseURL}/v1/models`.
 3. **Pilih model** — tandai model yang ingin dicek (bisa semua).
 4. **Atur timeout** — batas waktu menunggu response tiap model, default **15 detik** (bisa diubah 1–300 detik).
@@ -54,7 +54,7 @@ Catatan arm64:
 7. **Edit manual** — ubah urutan sesuai keinginan.
 8. **Nama tampilan** — pilih nama pendek otomatis (ambil bagian terakhir ID) atau isi manual per model. Nomor urut dibuat otomatis dari posisi (`01.`, `02.`, ...).
 9. **Preview** — daftar nama + blok konfigurasi ditampilkan untuk dicek sebelum disimpan.
-10. **Simpan** — tulis ke `~/.config/opencode/opencode.jsonc` (macOS/Linux) atau `%APPDATA%\opencode\` (Windows), dengan merge aman yang mempertahankan konfigurasi lain.
+10. **Simpan** — tulis ke `~/.config/opencode/opencode.jsonc` (macOS/Linux) atau `%APPDATA%\opencode\` (Windows), dengan merge aman yang mempertahankan konfigurasi lain. Jika nama provider **sudah ada**, aplikasi memberi peringatan bahwa semua model lama di provider tersebut akan dihapus dan diganti dengan daftar saat ini.
 
 ## Struktur
 

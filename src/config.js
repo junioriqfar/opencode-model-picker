@@ -31,3 +31,17 @@ export function upsertProvider(config, provider) {
   else config.providers.push(provider)
   return config
 }
+
+export function updateProvider(config, index, patch) {
+  if (index >= 0 && index < config.providers.length) {
+    config.providers[index] = { ...config.providers[index], ...patch }
+  }
+  return config
+}
+
+export function deleteProvider(config, index) {
+  if (index >= 0 && index < config.providers.length) {
+    config.providers.splice(index, 1)
+  }
+  return config
+}
