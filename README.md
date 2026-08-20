@@ -52,7 +52,9 @@ Catatan arm64:
 5. **Tes akses** — setiap model diuji dengan request kecil. Model yang mati (410 end-of-life, 404 tidak ditemukan, timeout, rate-limit, respons HTML) dideteksi otomatis; rate-limit dicoba ulang sekali otomatis. Terdapat jeda 500ms antar model untuk mengurangi burst rate-limit (terpisah dari pengaturan timeout).
 6. **Skor otomatis** — model yang berfungsi diurutkan berdasarkan skor kemampuan coding (reasoning, tools, konteks, heuristik nama).
 7. **Edit manual** — ubah urutan sesuai keinginan.
-8. **Simpan** — tulis ke `~/.config/opencode/opencode.jsonc` (macOS/Linux) atau `%APPDATA%\opencode\` (Windows), dengan merge aman yang mempertahankan konfigurasi lain.
+8. **Nama tampilan** — pilih nama pendek otomatis (ambil bagian terakhir ID) atau isi manual per model. Nomor urut dibuat otomatis dari posisi (`01.`, `02.`, ...).
+9. **Preview** — daftar nama + blok konfigurasi ditampilkan untuk dicek sebelum disimpan.
+10. **Simpan** — tulis ke `~/.config/opencode/opencode.jsonc` (macOS/Linux) atau `%APPDATA%\opencode\` (Windows), dengan merge aman yang mempertahankan konfigurasi lain.
 
 ## Struktur
 

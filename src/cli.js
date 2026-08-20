@@ -220,14 +220,27 @@ async function main() {
   })
   if (isCancel(providerKey)) return handleCancel()
 
+  // Nama pendek: tanya sekali, bukan per model
+  const autoShort = await confirm({
+    message: 'Gunakan nama pendek otomatis (ambil bagian terakhir ID, mis. minimax-m3)?',
+    initialValue: true,
+  })
+  if (isCancel(autoShort)) return handleCancel()
+
   const shortNames = {}
-  for (const m of ranked) {
-    const short = await text({
-      message: `Nama pendek untuk "${m.id}" (kosongkan untuk memakai ID asli):`,
-      initialValue: m.id.split('/').pop(),
-    })
-    if (isCancel(short)) return handleCancel()
-    shortNames[m.id] = short.trim() || m.id
+  if (autoShort) {
+    for (const m of ranked) {
+      shortNames[m.id] = m.id.split('/').pop()
+    }
+  } else {
+    for (const m of ranked) {
+      const short = await text({
+        message: `Nama pendek untuk "${m.id}" (kosongkan untuk memakai ID asli):`,
+        initialValue: m.id.split('/').pop(),
+      })
+      if (isCancel(short)) return handleCancel()
+      shortNames[m.id] = (short ?? '').trim() || m.id
+    }
   }
 
   const ordered = ranked.map((m) => ({ id: m.id, shortName: shortNames[m.id], vision: m.capabilities.vision }))
@@ -246,6 +259,15 @@ async function main() {
   // ---------- 9. Preview & simpan ----------
   const { path: ocPath } = readOpencodeConfig()
   log.info(`Target config: ${ocPath}`)
+
+  log.message(pc.bold('Daftar nama yang akan ditulis:'))
+  ordered.forEach((m, i) => {
+    const number = String(i + 1).padStart(2, '0')
+    const isPaid = paidIds.includes(m.id)
+    const paidSuffix = markPaid && isPaid ? ' (PAID)' : ''
+    log.message(`  ${pc.cyan(`${number}. ${m.shortName}${paidSuffix}`)}  ${pc.dim('← ' + m.id)}`)
+  })
+
   const preview = JSON.stringify(providerBlock, null, 2)
   log.message(pc.bold('Preview blok provider yang akan ditulis:'))
   log.message(pc.dim(preview))
