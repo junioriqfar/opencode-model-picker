@@ -139,10 +139,10 @@ async function main() {
 
   // ---------- 5. Rekap hasil ----------
   const okModels = results
-    .filter((r) => r.ok)
+    .filter((r) => r.result.ok)
     .map((r) => ({ ...r.model, _testResult: r.result }))
-  const deadModels = results.filter((r) => !r.ok && r.result.dead)
-  const warnModels = results.filter((r) => !r.ok && !r.result.dead)
+  const deadModels = results.filter((r) => !r.result.ok && r.result.dead)
+  const warnModels = results.filter((r) => !r.result.ok && !r.result.dead)
 
   log.info(
     `${pc.green(`✓ ${okModels.length} berfungsi`)}  ${pc.red(
