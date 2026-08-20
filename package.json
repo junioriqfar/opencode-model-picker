@@ -1,0 +1,36 @@
+{
+  "name": "opencode-model-picker",
+  "version": "1.0.0",
+  "description": "Ambil, tes, urutkan, dan simpan model OpenAI-compatible ke konfigurasi OpenCode",
+  "type": "module",
+  "bin": {
+    "omp": "./src/cli.js",
+    "opencode-model-picker": "./src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/cli.js",
+    "build": "npm run build:macos && npm run build:win && npm run build:linux",
+    "build:macos": "pkg -t node24-macos-x64 . -o \"dist/opencode-model-picker-macos-x64\"",
+    "build:macos:arm64": "pkg -t node24-macos-arm64 . -o \"dist/opencode-model-picker-macos-arm64\" --no-signature",
+    "build:win": "pkg -t node24-win-x64 . -o \"dist/opencode-model-picker-win-x64.exe\"",
+    "build:linux": "pkg -t node24-linux-x64 . -o \"dist/opencode-model-picker-linux-x64\""
+  },
+  "keywords": [
+    "opencode",
+    "models",
+    "llm",
+    "provider",
+    "cli"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@clack/prompts": "^0.10.0",
+    "picocolors": "^1.1.1"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@yao-pkg/pkg": "^6.22.0"
+  }
+}
