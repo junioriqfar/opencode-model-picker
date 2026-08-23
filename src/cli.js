@@ -304,7 +304,7 @@ async function main() {
 
 async function addNewProvider(config) {
   const baseURL = await text({
-    message: 'Base URL provider (mis. https://9router.penjualanku.web.id/v1):',
+    message: 'Base URL provider (mis. https://9router.com/v1):',
     placeholder: 'https://...',
     validate: (v) => (v && v.trim() ? undefined : 'Base URL wajib diisi'),
   })

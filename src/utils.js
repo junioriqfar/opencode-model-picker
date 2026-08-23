@@ -5,10 +5,7 @@ import { join } from 'node:path'
 export const APP_NAME = 'opencode-model-picker'
 
 export function configDir() {
-  const base =
-    process.platform === 'win32'
-      ? process.env.APPDATA || join(homedir(), 'AppData', 'Roaming')
-      : join(homedir(), '.config')
+  const base = process.env.XDG_CONFIG_HOME || join(homedir(), '.config')
   return join(base, APP_NAME)
 }
 
@@ -23,11 +20,8 @@ export function ensureConfigDir() {
 }
 
 export function opencodeConfigPath() {
-  if (process.platform === 'win32') {
-    const base = process.env.APPDATA || join(homedir(), 'AppData', 'Roaming')
-    return join(base, 'opencode', 'opencode.jsonc')
-  }
-  return join(homedir(), '.config', 'opencode', 'opencode.jsonc')
+  const base = process.env.XDG_CONFIG_HOME || join(homedir(), '.config')
+  return join(base, 'opencode', 'opencode.jsonc')
 }
 
 export function stripJsoncComments(src) {
