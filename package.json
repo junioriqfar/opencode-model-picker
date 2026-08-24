@@ -1,6 +1,6 @@
 {
   "name": "opencode-model-picker",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Ambil, tes, urutkan, dan simpan model OpenAI-compatible ke konfigurasi OpenCode",
   "type": "module",
   "bin": {
