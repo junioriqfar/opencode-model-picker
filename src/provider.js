@@ -183,7 +183,9 @@ export async function testModel({
 }
 
 function classifyError(model, status, json, text, lang = 'en') {
-  let detail = json?.error?.message ?? text ?? ''
+  let detail = ''
+  if (typeof json?.error === 'string') detail = json.error
+  else detail = json?.error?.message ?? text ?? ''
   let lower = detail.toLowerCase()
 
   // OpenRouter wraps provider errors: {"error":{"message":"Provider returned error","metadata":{"raw":"{\n  \"error\":...}"}}}
@@ -231,6 +233,17 @@ function classifyError(model, status, json, text, lang = 'en') {
 
   const isAuth = status === 401 || status === 403 || lower.includes('unauthorized')
 
+  const isPayment =
+    status === 402 ||
+    lower.includes('payment required') ||
+    lower.includes('requires a subscription') ||
+    lower.includes('requires subscription') ||
+    lower.includes('upgrade for') ||
+    lower.includes('insufficient') ||
+    lower.includes('quota exceeded') ||
+    lower.includes('billing') ||
+    lower.includes('subscription') // covers "this model requires a subscription"
+
   const isInvalidModel =
     lower.includes('model does not exist') ||
     lower.includes('invalid model') ||
@@ -262,6 +275,33 @@ function classifyError(model, status, json, text, lang = 'en') {
       status,
       error: 'auth',
       message: t(lang, 'errAuth'),
+      detail: oneLine(detail, 200),
+      dead: true,
+    }
+  }
+  if (isPayment) {
+    return {
+      ok: false,
+      status,
+      error: 'payment',
+      message: t(lang, 'errPayment'),
+      detail: oneLine(detail, 200),
+      dead: true,
+    }
+  }
+  const isBadRequest =
+    status === 400 ||
+    lower.includes('bad request') ||
+    lower.includes('invalid argument') ||
+    lower.includes('not supported') ||
+    lower.includes('unsupported') ||
+    lower.includes('provider returned error')
+  if (isBadRequest) {
+    return {
+      ok: false,
+      status,
+      error: 'badrequest',
+      message: oneLine(detail, 120) || t(lang, 'errBadRequest'),
       detail: oneLine(detail, 200),
       dead: true,
     }
