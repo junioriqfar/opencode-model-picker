@@ -1,3 +1,10 @@
+import { t } from './i18n.js'
+
+function oneLine(str, max = 120) {
+  if (!str) return ''
+  return String(str).replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max)
+}
+
 const TEST_MESSAGE = 'Say hi'
 const TEST_MAX_TOKENS = 16
 const TEST_TIMEOUT = 15000
@@ -24,7 +31,7 @@ async function fetchWithTimeout(url, options, timeoutMs) {
   }
 }
 
-export async function listModels({ baseURL, apiKey }) {
+export async function listModels({ baseURL, apiKey, lang = 'en' }) {
   const url = `${normalizeModelURL(baseURL)}/models`
   const res = await fetchWithTimeout(
     url,
@@ -35,13 +42,12 @@ export async function listModels({ baseURL, apiKey }) {
     30000,
   )
   if (!res.ok) {
-    throw new Error(
-      `Gagal mengambil daftar model (HTTP ${res.status}): ${(await res.text()).slice(0, 300)}`,
-    )
+    const body = oneLine(await res.text(), 120)
+    throw new Error(t(lang, 'errFetchModels', { status: res.status, body }))
   }
   const data = await res.json()
   if (!Array.isArray(data?.data)) {
-    throw new Error('Format respons /v1/models tidak dikenali (bukan array data)')
+    throw new Error(t(lang, 'errModelFormat'))
   }
   return data.data.map((m) => normalizeModel(m))
 }
@@ -82,6 +88,7 @@ export async function testModel({
   model,
   timeoutMs = TEST_TIMEOUT,
   retryOn429 = true,
+  lang = 'en',
 }) {
   const url = `${normalizeModelURL(baseURL)}/chat/completions`
 
@@ -121,19 +128,19 @@ export async function testModel({
           ok: false,
           status: res.status,
           error: 'html',
-          message: 'Server mengembalikan halaman HTML (bukan API JSON)',
-          detail: text.slice(0, 200),
+          message: t(lang, 'errHtmlResponse'),
+          detail: oneLine(text, 200),
           dead: false,
         }
       }
 
       if (!res.ok) {
-        return classifyError(model, res.status, json, text)
+        return classifyError(model, res.status, json, text, lang)
       }
 
       // Respons 200 tapi bentuknya error (mis. {"error":{...}})
       if (json && json.error && !json.choices) {
-        return classifyError(model, 200, json, text)
+        return classifyError(model, 200, json, text, lang)
       }
 
       const content = json?.choices?.[0]?.message?.content ?? null
@@ -143,7 +150,7 @@ export async function testModel({
           status: res.status,
           message: 'Respons kosong (mungkin token habis untuk reasoning)',
           warning: true,
-          detail: text.slice(0, 200),
+          detail: oneLine(text, 200),
         }
       }
       return { ok: true, status: res.status, message: 'OK', warning: false, detail: null }
@@ -153,7 +160,7 @@ export async function testModel({
           ok: false,
           status: 'timeout',
           error: 'timeout',
-          message: `Timeout setelah ${Math.round(timeoutMs / 1000)} detik`,
+          message: t(lang, 'errTimeout', { sec: Math.round(timeoutMs / 1000) }),
           dead: false,
         }
       }
@@ -161,7 +168,7 @@ export async function testModel({
         ok: false,
         status: 'network',
         error: 'network',
-        message: `Network error: ${err.message ?? 'tak dikenal'}`,
+        message: t(lang, 'errNetwork', { msg: oneLine(err.message ?? t(lang, 'errUnknown'), 100) }),
         dead: false,
       }
     }
@@ -175,9 +182,35 @@ export async function testModel({
   return result
 }
 
-function classifyError(model, status, json, text) {
-  const detail = json?.error?.message ?? text ?? ''
-  const lower = detail.toLowerCase()
+function classifyError(model, status, json, text, lang = 'en') {
+  let detail = json?.error?.message ?? text ?? ''
+  let lower = detail.toLowerCase()
+
+  // OpenRouter wraps provider errors: {"error":{"message":"Provider returned error","metadata":{"raw":"{\n  \"error\":...}"}}}
+  // Extract inner message for a more useful single-line display
+  let effectiveDetail = detail
+  let effectiveLower = lower
+  if (lower === 'provider returned error' && json?.error?.metadata?.raw) {
+    try {
+      const inner = JSON.parse(json.error.metadata.raw)
+      const innerMsg = inner?.error?.message ?? inner?.error?.details?.[0]?.reason ?? inner?.message
+      if (innerMsg && typeof innerMsg === 'string') {
+        effectiveDetail = innerMsg
+        effectiveLower = innerMsg.toLowerCase()
+      } else {
+        effectiveDetail = oneLine(json.error.metadata.raw, 200)
+        effectiveLower = effectiveDetail.toLowerCase()
+      }
+    } catch {
+      effectiveDetail = oneLine(json.error.metadata.raw, 200)
+      effectiveLower = effectiveDetail.toLowerCase()
+    }
+  } else {
+    effectiveDetail = detail
+    effectiveLower = lower
+  }
+  detail = effectiveDetail
+  lower = effectiveLower
 
   const status410 = status === 410
   const isEOL =
@@ -208,8 +241,8 @@ function classifyError(model, status, json, text) {
       ok: false,
       status,
       error: 'eol',
-      message: 'End-of-life / tidak tersedia lagi',
-      detail: detail.slice(0, 200),
+      message: t(lang, 'errEol'),
+      detail: oneLine(detail, 200),
       dead: true,
     }
   }
@@ -218,8 +251,8 @@ function classifyError(model, status, json, text) {
       ok: false,
       status,
       error: 'notfound',
-      message: 'Model tidak ditemukan',
-      detail: detail.slice(0, 200),
+      message: t(lang, 'errNotFound'),
+      detail: oneLine(detail, 200),
       dead: true,
     }
   }
@@ -228,8 +261,8 @@ function classifyError(model, status, json, text) {
       ok: false,
       status,
       error: 'auth',
-      message: 'API key tidak valid / tidak punya akses',
-      detail: detail.slice(0, 200),
+      message: t(lang, 'errAuth'),
+      detail: oneLine(detail, 200),
       dead: true,
     }
   }
@@ -238,8 +271,8 @@ function classifyError(model, status, json, text) {
       ok: false,
       status,
       error: 'ratelimit',
-      message: 'Rate limited (sementara)',
-      detail: detail.slice(0, 200),
+      message: t(lang, 'errRateLimit'),
+      detail: oneLine(detail, 200),
       dead: false,
     }
   }
@@ -247,8 +280,8 @@ function classifyError(model, status, json, text) {
     ok: false,
     status,
     error: 'error',
-    message: detail.slice(0, 200) || `HTTP ${status}`,
-    detail: detail.slice(0, 200),
+    message: oneLine(detail, 120) || `HTTP ${status}`,
+    detail: oneLine(detail, 200),
     dead: false,
   }
 }

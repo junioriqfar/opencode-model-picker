@@ -1,36 +1,40 @@
 # opencode-model-picker
 
-Ambil daftar model dari provider OpenAI-compatible (mis. 9Router), cek aksesibilitasnya, urutkan berdasarkan kemampuan coding, lalu simpan ke konfigurasi OpenCode.
+<p align="center">
+  <a href="./README.md">🇬🇧 English</a> | <a href="./README.id.md">🇮🇩 Indonesia</a>
+</p>
+
+Fetch models from any OpenAI-compatible provider (e.g. 9Router), check their accessibility, rank them by coding capability, then save to your OpenCode configuration.
 
 Cross-platform: macOS, Windows, Linux.
 
-## Instalasi
+## Installation
 
 ```bash
 cd opencode-model-picker
 npm install
 ```
 
-## Cara pakai
+## Usage
 
 ```bash
 npm start
-# atau
+# or
 node src/cli.js
 ```
 
-## Build executable (Windows, macOS, Linux)
+## Build Executable (Windows, macOS, Linux)
 
-Menggunakan [@yao-pkg/pkg](https://github.com/yao-pkg/pkg) — menghasilkan satu file executable tanpa perlu Node.js terpasang di mesin target.
+Built with [@yao-pkg/pkg](https://github.com/yao-pkg/pkg) — produces a single executable file with no Node.js runtime required on the target machine.
 
 ```bash
-npm run build         # build semua (macOS x64, Windows x64, Linux x64)
-npm run build:macos   # hanya macOS x64
-npm run build:win     # hanya Windows x64 (.exe)
-npm run build:linux   # hanya Linux x64
+npm run build         # build all (macOS x64, Windows x64, Linux x64)
+npm run build:macos   # macOS x64 only
+npm run build:win     # Windows x64 only (.exe)
+npm run build:linux   # Linux x64 only
 ```
 
-Hasil di folder `dist/`:
+Output in `dist/`:
 
 ```
 dist/
@@ -39,36 +43,69 @@ dist/
 └── opencode-model-picker-linux-x64
 ```
 
-Catatan arm64:
-- Build **macOS arm64 (Apple Silicon)** memerlukan mesin Apple Silicon (atau Rosetta terpasang) karena pkg menjalankan binary target untuk verifikasi: `npm run build:macos:arm64`.
-- Komputer Intel (x64) hanya bisa menghasilkan binary x64 untuk macOS/Windows/Linux.
+arm64 notes:
+- Building **macOS arm64 (Apple Silicon)** requires an Apple Silicon machine (or Rosetta installed) because pkg runs the target binary for verification: `npm run build:macos:arm64`.
+- Intel (x64) machines can only produce x64 binaries for macOS/Windows/Linux.
 
-## Alur
+## First Run
 
-1. **Aksi awal** — pilih antara *Gunakan provider tersimpan*, *Kelola provider tersimpan* (ubah nama/base URL/API key, hapus), *Tambah provider baru*, atau *Keluar*.
-2. **Ambil model** — aplikasi memanggil `GET {baseURL}/v1/models`.
-3. **Pilih model** — tandai model yang ingin dicek (bisa semua).
-4. **Atur timeout** — batas waktu menunggu response tiap model, default **15 detik** (bisa diubah 1–300 detik).
-5. **Tes akses** — setiap model diuji dengan request kecil. Model yang mati (410 end-of-life, 404 tidak ditemukan, timeout, rate-limit, respons HTML) dideteksi otomatis; rate-limit dicoba ulang sekali otomatis. Terdapat jeda 500ms antar model untuk mengurangi burst rate-limit (terpisah dari pengaturan timeout).
-6. **Skor otomatis** — model yang berfungsi diurutkan berdasarkan skor kemampuan coding (reasoning, tools, konteks, heuristik nama).
-7. **Edit manual** — ubah urutan sesuai keinginan.
-8. **Nama tampilan** — pilih nama pendek otomatis (ambil bagian terakhir ID) atau isi manual per model. Nomor urut dibuat otomatis dari posisi (`01.`, `02.`, ...).
-9. **Preview** — daftar nama + blok konfigurasi ditampilkan untuk dicek sebelum disimpan.
-10. **Simpan** — tulis ke `~/.config/opencode/opencode.jsonc` (macOS/Linux) atau `%APPDATA%\opencode\` (Windows), dengan merge aman yang mempertahankan konfigurasi lain. Jika nama provider **sudah ada**, aplikasi memberi peringatan bahwa semua model lama di provider tersebut akan dihapus dan diganti dengan daftar saat ini.
+When no config file exists (`~/.config/opencode-model-picker/config.json` not found), the app shows a **first-run wizard** and prompts for all settings in order:
+1. **Language** — `English` / `Indonesia`
+2. **Default timeout** — 1–300 seconds
+3. **Numbering style** — `01.` / `1.` / `001.` / `01 -` / `none`
 
-## Struktur
+All settings are saved immediately and applied to the current session.
+
+## Workflow
+
+1. **Initial action** — choose between *Use saved provider*, *Manage saved providers* (edit name/base URL/API key, delete — bottom option is **Kembali** / **Back** in green), *Add new provider*, *Settings*, or *Exit*.
+2. **Fetch models** — the app calls `GET {baseURL}/v1/models`. On failure, error is shown and you return to the main menu (app does not close).
+3. **Select models** — after fetching, choose **Select all (X models)** to test every model, or **Custom** to pick specific models via multiselect (space to select, enter to continue). If no model is selected in Custom mode, you return to the main menu.
+4. **Test access** — each model is tested with a small request using the timeout from **Settings → Default timeout** (initially **15 seconds**, configurable 1–300 seconds, stored in settings). The spinner stays on a single line per model (`model-id ✓/✗ — short message`), sanitized to one line and truncated (handles OpenRouter `Provider returned error` wrapping by extracting inner message). Rate-limited requests are retried once automatically. A 500ms delay between models reduces burst rate-limiting.
+5. **Recap** — shows `✓ X working  ✗ Y dead/EOL/not found  ! Z temporary (timeout/rate-limit)` and lists each dead/warn model on its own single line. If **0 working**, it shows `No working models...` and returns to the main menu instead of closing.
+6. **Auto scoring** — working models are ranked by coding capability score (reasoning, tools, context, name heuristics). Ranking is shown as a single non-interactive block with numbers, no enter required:
+   ```
+   Initial ranking (auto score):
+     1. nvidia/minimaxai/minimax-m3 (score 85)
+     2. gemini/gemini-3-flash-preview (score 80)
+   ```
+7. **Manual edit** — optionally reorder via `Select model to move → Move to position (1-N)`. Current order is also shown as `1. id (score 85)` in one block.
+8. **Display name** — choose auto short names (take the last segment of the ID) or enter them manually per model. Sequence numbers are auto-generated from position using the **Settings → Numbering style** (e.g. `01.`, `1.`, `001.`, `01 -`, or `none`).
+9. **Preview** — name list + configuration block are shown for review before saving.
+10. **Save** — writes to `~/.config/opencode/opencode.jsonc` (macOS/Linux) or `%APPDATA%\opencode\` (Windows), with a safe merge that preserves other configuration. If the provider name **already exists**, the app warns that all existing models for that provider will be deleted and replaced with the current list.
+11. **Repeat** — after save/cancel, the app asks **Do you want to run again?** (`If yes, you will return to the main menu.`). If **Yes**, it loops back to *Initial action*; if **No** (or Enter), it exits.
+
+## Settings
+
+Available from the main menu → **Settings** (Back button is green by design):
+
+- **Language** — switch between `English` and `Indonesia`. All prompts, messages, and errors follow the selected language.
+- **Default timeout** — per-model timeout in seconds (1–300) used during testing. No per-run prompt; change it in Settings.
+- **Numbering style** — how model names are prefixed in OpenCode:
+  - `01.` → `01. model`, `02. model` (padded 2 digits, default)
+  - `1.` → `1. model`, `2. model`
+  - `001.` → `001. model`, `002. model` (padded 3 digits)
+  - `01 -` → `01 - model`, `02 - model`
+  - `none` → `model` (no prefix)
+
+Settings are stored in `~/.config/opencode-model-picker/config.json` alongside saved providers and support migration from older configs.
+
+## Project Structure
 
 ```
 src/
-├── cli.js        # alur interaktif (@clack/prompts)
-├── provider.js   # GET /v1/models + test /v1/chat/completions
-├── scoring.js    # skor otomatis kemampuan coding
-├── config.js     # simpan/muat config aplikasi (~/.config/opencode-model-picker/)
-├── opencode.js   # merge aman ke opencode.jsonc
-└── utils.js      # path cross-platform, parser JSONC
+├── cli.js        # interactive flow (@clack/prompts) + i18n + settings + outer loop (no auto-close) + single-line spinner
+├── i18n.js       # translations (en/id) + numbering styles
+├── provider.js   # GET /v1/models + test /v1/chat/completions + single-line sanitization + OpenRouter inner error extraction
+├── scoring.js    # auto scoring for coding capability
+├── config.js     # app config load/save (~/.config/opencode-model-picker/) + settings (language/timeout/numbering)
+├── opencode.js   # safe merge into opencode.jsonc (numbering-aware)
+└── utils.js      # cross-platform paths, JSONC parser
 ```
 
-## Catatan
+## Notes
 
-- Config aplikasi (provider tersimpan) disimpan di `~/.config/opencode-model-picker/config.json` (API key plain text — jaga file ini).
-- Setelah menulis ke opencode, **restart opencode** lalu pilih model via `/models`.
+- App config (saved providers + settings) is stored at `~/.config/opencode-model-picker/config.json` (API keys are plain text — keep this file secure).
+- Test spinner is forced to one line per model (newlines collapsed, truncated to 80 chars) to avoid spamming the terminal on verbose provider errors (e.g. `openrouter/google/lyria-3-pro-preview`).
+- If no model works or fetch fails, the app returns to the main menu instead of exiting.
+- After writing to OpenCode, **restart opencode** and select the model via `/models`.

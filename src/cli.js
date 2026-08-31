@@ -28,35 +28,180 @@ import {
   readOpencodeConfig,
   providerExists,
 } from './opencode.js'
-import { APP_NAME } from './utils.js'
+import { existsSync } from 'node:fs'
+import { APP_NAME, appConfigPath } from './utils.js'
+import { t, formatNumber, NUMBERING_STYLES } from './i18n.js'
+
+function oneLine(str, max = 80) {
+  return String(str ?? '').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max)
+}
 
 async function main() {
-  intro(pc.bold(pc.cyan(` ${APP_NAME} — ambil, tes & urutkan model untuk OpenCode`)))
-
   let config = loadAppConfig()
+  let lang = config.settings.language
+  const tr = (key, params) => t(lang, key, params)
 
-  // ---------- 1. Provider ----------
-  let provider
-  while (true) {
+  intro(pc.bold(pc.cyan(` ${APP_NAME} — ${tr('intro')}`)))
+
+  // ---------- First run: if no config file, prompt all settings ----------
+  if (!existsSync(appConfigPath())) {
+    log.message(pc.bold(t(lang, 'firstRunTitle')))
+    log.info(t(lang, 'firstRunDesc'))
+
+    // Language
+    {
+      const langPick = await select({
+        message: t(lang, 'languagePrompt'),
+        options: [
+          { value: 'en', label: t(lang, 'languageEn') },
+          { value: 'id', label: t(lang, 'languageId') },
+        ],
+      })
+      if (isCancel(langPick)) return handleCancel(lang)
+      config.settings.language = langPick
+      lang = langPick
+      saveAppConfig(config)
+      log.success(t(lang, 'languageUpdated', { lang: langPick === 'en' ? 'English' : 'Indonesia' }))
+    }
+    // Timeout
+    {
+      const picked = await text({
+        message: t(lang, 'timeoutPromptSettings'),
+        initialValue: String(config.settings.timeout),
+        validate: (v) => {
+          const n = Number(v)
+          if (!Number.isInteger(n) || n < 1 || n > 300) return t(lang, 'timeoutValidation')
+          return undefined
+        },
+      })
+      if (isCancel(picked)) return handleCancel(lang)
+      config.settings.timeout = Number(picked)
+      saveAppConfig(config)
+      log.success(t(lang, 'timeoutUpdated', { sec: config.settings.timeout }))
+    }
+    // Numbering
+    {
+      const picked = await select({
+        message: t(lang, 'numberingPrompt'),
+        options: Object.keys(NUMBERING_STYLES).map((k) => {
+          const label = NUMBERING_STYLES[k].label[lang]
+          const preview = `${formatNumber(0, k)}model-a | ${formatNumber(1, k)}model-b | ${formatNumber(9, k)}model-j`
+          return { value: k, label: `${k} — ${label} ${pc.dim(`(${preview})`)}` }
+        }),
+      })
+      if (isCancel(picked)) return handleCancel(lang)
+      config.settings.numbering = picked
+      saveAppConfig(config)
+      log.success(t(lang, 'numberingUpdated', { style: picked }))
+    }
+    // reload to ensure consistency
     config = loadAppConfig()
+    lang = config.settings.language
+    log.message(pc.green(`${t(lang, 'firstRunTitle')} — ${t(lang, 'pressEnterToContinue')}`))
+  }
+
+  // settings handler defined as closure to mutate lang/config
+  async function handleSettingsMenu() {
+    while (true) {
+      config = loadAppConfig()
+      lang = config.settings.language
+      const curLangLabel = lang === 'en' ? t(lang, 'languageEn') : t(lang, 'languageId')
+      const timeout = config.settings.timeout
+      const numbering = config.settings.numbering
+      const numberingPreview = `${formatNumber(0, numbering)}example-model`
+
+      const choice = await select({
+        message: t(lang, 'settingsTitle'),
+        options: [
+          { value: 'language', label: `${t(lang, 'settingsLanguage')}: ${curLangLabel}` },
+          { value: 'timeout', label: `${t(lang, 'settingsTimeout')}: ${timeout}s` },
+          {
+            value: 'numbering',
+            label: `${t(lang, 'settingsNumbering')}: ${numbering} ${pc.dim(`(${t(lang, 'numberingPreview', { preview: numberingPreview })})`)}`,
+          },
+          { value: 'back', label: pc.green(t(lang, 'settingsBack')) },
+        ],
+      })
+      if (isCancel(choice)) return
+      if (choice === 'back') break
+
+      if (choice === 'language') {
+        const langPick = await select({
+          message: t(lang, 'languagePrompt'),
+          options: [
+            { value: 'en', label: t(lang, 'languageEn') },
+            { value: 'id', label: t(lang, 'languageId') },
+          ],
+        })
+        if (isCancel(langPick)) continue
+        config.settings.language = langPick
+        saveAppConfig(config)
+        lang = langPick
+        log.success(t(lang, 'languageUpdated', { lang: langPick === 'en' ? 'English' : 'Indonesia' }))
+      } else if (choice === 'timeout') {
+        const newTimeout = await text({
+          message: t(lang, 'timeoutPromptSettings'),
+          initialValue: String(config.settings.timeout),
+          validate: (v) => {
+            const n = Number(v)
+            if (!Number.isInteger(n) || n < 1 || n > 300) return t(lang, 'timeoutValidation')
+            return undefined
+          },
+        })
+        if (isCancel(newTimeout)) continue
+        config.settings.timeout = Number(newTimeout)
+        saveAppConfig(config)
+        log.success(t(lang, 'timeoutUpdated', { sec: config.settings.timeout }))
+      } else if (choice === 'numbering') {
+        const numberingChoice = await select({
+          message: t(lang, 'numberingPrompt'),
+          options: Object.keys(NUMBERING_STYLES).map((k) => {
+            const styleLabel = NUMBERING_STYLES[k].label[lang]
+            const preview = `${formatNumber(0, k)}model-a | ${formatNumber(1, k)}model-b | ${formatNumber(9, k)}model-j`
+            return {
+              value: k,
+              label: `${k} — ${styleLabel} ${pc.dim(`(${preview})`)}`,
+            }
+          }),
+        })
+        if (isCancel(numberingChoice)) continue
+        config.settings.numbering = numberingChoice
+        saveAppConfig(config)
+        log.success(t(lang, 'numberingUpdated', { style: numberingChoice }))
+      }
+    }
+  }
+
+  appLoop: while (true) {
+    // ---------- 1. Provider ----------
+    let provider
+    while (true) {
+    config = loadAppConfig()
+    lang = config.settings.language
     const hasSaved = config.providers.length > 0
     const options = []
-    if (hasSaved) options.push({ value: 'use', label: 'Gunakan provider tersimpan' })
-    if (hasSaved) options.push({ value: 'manage', label: 'Kelola provider tersimpan' })
-    options.push({ value: 'new', label: 'Tambah provider baru' })
-    if (hasSaved) options.push({ value: 'exit', label: pc.red('Keluar') })
+    if (hasSaved) options.push({ value: 'use', label: t(lang, 'actionUse') })
+    if (hasSaved) options.push({ value: 'manage', label: t(lang, 'actionManage') })
+    options.push({ value: 'new', label: t(lang, 'actionNew') })
+    options.push({ value: 'settings', label: t(lang, 'actionSettings') })
+    if (hasSaved) options.push({ value: 'exit', label: pc.red(t(lang, 'actionExit')) })
 
     const startChoice = await select({
-      message: 'Pilih aksi:',
+      message: t(lang, 'chooseAction'),
       options,
     })
-    if (isCancel(startChoice)) return handleCancel()
+    if (isCancel(startChoice)) return handleCancel(lang)
     if (startChoice === 'exit') {
-      outro(pc.yellow('Selesai.'))
+      outro(pc.yellow(t(lang, 'outroDone')))
       return
     }
     if (startChoice === 'manage') {
-      await manageProviders()
+      await manageProviders(lang)
+      continue
+    }
+    if (startChoice === 'settings') {
+      await handleSettingsMenu()
+      // refresh intro? just continue loop (lang may have changed, re-show intro? keep simple)
       continue
     }
 
@@ -66,62 +211,66 @@ async function main() {
         label: `${p.name} — ${p.baseURL}`,
       }))
       const picked = await select({
-        message: 'Pilih provider:',
+        message: t(lang, 'chooseProvider'),
         options: names,
       })
-      if (isCancel(picked)) return handleCancel()
+      if (isCancel(picked)) return handleCancel(lang)
       provider = { ...config.providers[picked] }
     } else {
-      provider = await addNewProvider(config)
+      provider = await addNewProvider(config, lang)
     }
     break
   }
 
   // ---------- 2. Ambil model ----------
   const s = spinner()
-  s.start('Mengambil daftar model...')
+  s.start(t(lang, 'fetchingModels'))
   let models
   try {
-    models = await listModels({ baseURL: provider.baseURL, apiKey: provider.apiKey })
-    s.stop(`Ditemukan ${models.length} model.`)
+    models = await listModels({ baseURL: provider.baseURL, apiKey: provider.apiKey, lang })
+    s.stop(t(lang, 'foundModels', { count: models.length }))
   } catch (err) {
-    s.stop('Gagal mengambil model.')
-    cancel(err.message)
-    return
+    s.stop(t(lang, 'failedFetch'))
+    log.error(err.message)
+    continue appLoop
   }
 
   // ---------- 3. Pilih model untuk dicek ----------
-  const selected = await multiselect({
-    message: 'Pilih model yang akan dicek (spasi untuk pilih, enter untuk lanjut):',
-    options: models.map((m) => ({ value: m.id, label: m.id })),
-    required: false,
-    maxItems: 40,
+  const mode = await select({
+    message: t(lang, 'selectModePrompt', { count: models.length }),
+    options: [
+      { value: 'all', label: t(lang, 'selectAll', { count: models.length }) },
+      { value: 'custom', label: t(lang, 'selectCustom') },
+    ],
   })
-  if (isCancel(selected)) return handleCancel()
+  if (isCancel(mode)) return handleCancel(lang)
 
-  const toTest = selected.length > 0 ? models.filter((m) => selected.includes(m.id)) : models
+  let toTest
+  if (mode === 'all') {
+    toTest = models
+  } else {
+    const selected = await multiselect({
+      message: t(lang, 'selectModels'),
+      options: models.map((m) => ({ value: m.id, label: m.id })),
+      required: false,
+      maxItems: 40,
+    })
+    if (isCancel(selected)) return handleCancel(lang)
+    if (selected.length === 0) {
+      log.warn(t(lang, 'noProvider'))
+      continue appLoop
+    }
+    toTest = models.filter((m) => selected.includes(m.id))
+  }
   if (toTest.length === 0) {
-    cancel('Tidak ada model dipilih.')
-    return
+    log.warn(t(lang, 'noProvider'))
+    continue appLoop
   }
 
-  // ---------- 3b. Pengaturan tes ----------
-  const timeoutSec = await text({
-    message: 'Timeout per model (detik):',
-    initialValue: '15',
-    validate: (v) => {
-      const n = Number(v)
-      if (!Number.isInteger(n) || n < 1 || n > 300)
-        return 'Masukkan angka bulat antara 1-300'
-      return undefined
-    },
-  })
-  if (isCancel(timeoutSec)) return handleCancel()
-  const timeoutMs = Number(timeoutSec) * 1000
-
-  // ---------- 4. Tes akses ----------
+  // ---------- 4. Tes akses (timeout from Settings) ----------
+  const timeoutMs = config.settings.timeout * 1000
   const results = []
-  s.start('Mengecek akses model (mungkin butuh beberapa saat)...')
+  s.start(t(lang, 'checkingModels'))
   for (let i = 0; i < toTest.length; i++) {
     const m = toTest[i]
     const r = await testModel({
@@ -129,13 +278,14 @@ async function main() {
       apiKey: provider.apiKey,
       model: m.id,
       timeoutMs,
+      lang,
     })
     results.push({ model: m, result: r })
     if (r.ok) s.message(`${m.id} ${pc.green('✓')}`)
-    else s.message(`${m.id} ${pc.red('✗')} — ${r.message ?? 'Error tak dikenal'}`)
+    else s.message(`${m.id} ${pc.red('✗')} — ${oneLine(r.message ?? t(lang, 'errUnknown'), 80)}`)
     if (i < toTest.length - 1) await sleep(500)
   }
-  s.stop('Pengecekan selesai.')
+  s.stop(t(lang, 'checkDone'))
 
   // ---------- 5. Rekap hasil ----------
   const okModels = results
@@ -145,87 +295,88 @@ async function main() {
   const warnModels = results.filter((r) => !r.result.ok && !r.result.dead)
 
   log.info(
-    `${pc.green(`✓ ${okModels.length} berfungsi`)}  ${pc.red(
-      `✗ ${deadModels.length} mati/EOL/tidak ada`,
-    )}  ${pc.yellow(`! ${warnModels.length} gagal sementara (timeout/rate-limit)`)}`,
+    `${pc.green(t(lang, 'recapOk', { count: okModels.length }))}  ${pc.red(
+      t(lang, 'recapDead', { count: deadModels.length }),
+    )}  ${pc.yellow(t(lang, 'recapWarn', { count: warnModels.length }))}`,
   )
 
   if (warnModels.length > 0) {
     log.warn(
       warnModels
-        .map((r) => `  ! ${r.model.id} — ${r.result.message ?? 'Error tak dikenal'}`)
+        .map((r) => `  ! ${r.model.id} — ${oneLine(r.result.message ?? t(lang, 'errUnknown'), 100)}`)
         .join('\n'),
     )
   }
   if (deadModels.length > 0) {
     log.error(
       deadModels
-        .map((r) => `  ✗ ${r.model.id} — ${r.result.message ?? 'Error tak dikenal'}`)
+        .map((r) => `  ✗ ${r.model.id} — ${oneLine(r.result.message ?? t(lang, 'errUnknown'), 100)}`)
         .join('\n'),
     )
   }
 
   if (okModels.length === 0) {
-    cancel('Tidak ada model yang berfungsi. Periksa baseURL/apiKey atau coba model lain.')
-    return
+    log.error(t(lang, 'noWorkingModel'))
+    // kembali ke menu utama tanpa menutup aplikasi
+    continue appLoop
   }
 
   // ---------- 6. Skor otomatis ----------
   let ranked = sortByScore(attachScores(okModels))
 
-  // tampilkan ranking awal
-  log.message(pc.bold('Ranking awal (skor otomatis):'))
-  ranked.forEach((m, i) => {
-    log.message(`  ${String(i + 1).padStart(2, '0')}. ${m.id} ${pc.dim(`(skor ${m._score})`)}`)
-  })
+  // tampilkan ranking awal (tanpa perlu enter, langsung beri nomor)
+  {
+    const lines = ranked.map((m, i) => `  ${i + 1}. ${m.id} ${pc.dim(t(lang, 'scoreLabel', { score: m._score }))}`).join('\n')
+    log.message(`${pc.bold(t(lang, 'rankingTitle'))}\n${lines}`)
+  }
 
   // ---------- 7. Edit manual ----------
   const editManual = await confirm({
-    message: 'Edit urutan secara manual?',
+    message: t(lang, 'editOrderConfirm'),
     initialValue: false,
   })
-  if (isCancel(editManual)) return handleCancel()
+  if (isCancel(editManual)) return handleCancel(lang)
 
   if (editManual) {
-    ranked = await manualReorder(ranked)
+    ranked = await manualReorder(ranked, lang, config.settings.numbering)
   }
 
   // ---------- 8. Konfigurasi output ----------
-  log.message(pc.bold('Pengaturan konfigurasi:'))
+  log.message(pc.bold(t(lang, 'configSettingsTitle')))
 
   const markPaid = await confirm({
-    message: 'Tandai model berbayar dengan label (PAID)?',
+    message: t(lang, 'markPaidConfirm'),
     initialValue: true,
   })
-  if (isCancel(markPaid)) return handleCancel()
+  if (isCancel(markPaid)) return handleCancel(lang)
 
   let paidIds = []
   if (markPaid) {
     const paidSel = await multiselect({
-      message: 'Pilih model yang PAID (spasi untuk pilih):',
+      message: t(lang, 'selectPaid'),
       options: ranked.map((m) => ({
         value: m.id,
         label: m.id,
       })),
       required: false,
     })
-    if (isCancel(paidSel)) return handleCancel()
+    if (isCancel(paidSel)) return handleCancel(lang)
     paidIds = paidSel ?? []
   }
 
   const providerKey = await text({
-    message: 'Key provider di opencode (mis. 9Router, DeepSeek):',
+    message: t(lang, 'providerKeyPrompt'),
     initialValue: provider.name,
-    validate: (v) => (v && v.trim() ? undefined : 'Wajib diisi'),
+    validate: (v) => (v && v.trim() ? undefined : t(lang, 'required')),
   })
-  if (isCancel(providerKey)) return handleCancel()
+  if (isCancel(providerKey)) return handleCancel(lang)
 
   // Nama pendek: tanya sekali, bukan per model
   const autoShort = await confirm({
-    message: 'Gunakan nama pendek otomatis (ambil bagian terakhir ID, mis. minimax-m3)?',
+    message: t(lang, 'autoShortConfirm'),
     initialValue: true,
   })
-  if (isCancel(autoShort)) return handleCancel()
+  if (isCancel(autoShort)) return handleCancel(lang)
 
   const shortNames = {}
   if (autoShort) {
@@ -235,17 +386,17 @@ async function main() {
   } else {
     for (const m of ranked) {
       const short = await text({
-        message: `Nama pendek untuk "${m.id}" (kosongkan untuk memakai ID asli):`,
+        message: t(lang, 'shortNamePrompt', { id: m.id }),
         initialValue: m.id.split('/').pop(),
       })
-      if (isCancel(short)) return handleCancel()
+      if (isCancel(short)) return handleCancel(lang)
       shortNames[m.id] = (short ?? '').trim() || m.id
     }
   }
 
   const ordered = ranked.map((m) => ({ id: m.id, shortName: shortNames[m.id], vision: m.capabilities.vision }))
 
-  const modelsBlock = buildModelsBlock(ordered, { paidIds, markPaid })
+  const modelsBlock = buildModelsBlock(ordered, { paidIds, markPaid, numbering: config.settings.numbering })
   const providerBlock = {
     npm: '@ai-sdk/openai-compatible',
     name: provider.name,
@@ -257,71 +408,83 @@ async function main() {
   }
 
   // ---------- 9. Preview & simpan ----------
-  const { path: ocPath } = readOpencodeConfig()
-  log.info(`Target config: ${ocPath}`)
+  const { path: ocPath } = readOpencodeConfig(lang)
+  log.info(t(lang, 'targetConfig', { path: ocPath }))
 
-  log.message(pc.bold('Daftar nama yang akan ditulis:'))
+  log.message(pc.bold(t(lang, 'listToWrite')))
   ordered.forEach((m, i) => {
-    const number = String(i + 1).padStart(2, '0')
+    const prefix = formatNumber(i, config.settings.numbering)
     const isPaid = paidIds.includes(m.id)
     const paidSuffix = markPaid && isPaid ? ' (PAID)' : ''
-    log.message(`  ${pc.cyan(`${number}. ${m.shortName}${paidSuffix}`)}  ${pc.dim('← ' + m.id)}`)
+    log.message(`  ${pc.cyan(`${prefix}${m.shortName}${paidSuffix}`)}  ${pc.dim('← ' + m.id)}`)
   })
 
   const preview = JSON.stringify(providerBlock, null, 2)
-  log.message(pc.bold('Preview blok provider yang akan ditulis:'))
+  log.message(pc.bold(t(lang, 'previewBlock')))
   log.message(pc.dim(preview))
 
   const key = providerKey.trim()
-  const alreadyExists = providerExists(key)
+  const alreadyExists = providerExists(key, lang)
   if (alreadyExists) {
-    log.warn(
-      `Provider "${key}" sudah ada di opencode.jsonc. Menyimpan akan MENGHAPUS semua model yang ada di provider tersebut dan menggantinya dengan daftar saat ini.`,
-    )
+    log.warn(t(lang, 'providerExistsWarn', { key }))
   }
 
   const save = await confirm({
     message: alreadyExists
-      ? `Ganti provider "${key}" (hapus ${Object.keys(
-          readOpencodeConfig().config.provider?.[key]?.models ?? {},
-        ).length} model lama) dan tulis ${ordered.length} model baru?`
-      : 'Simpan ke konfigurasi opencode?',
+      ? t(lang, 'replaceConfirm', {
+          key,
+          oldCount: Object.keys(readOpencodeConfig(lang).config.provider?.[key]?.models ?? {}).length,
+          newCount: ordered.length,
+        })
+      : t(lang, 'saveConfirm'),
     initialValue: true,
   })
-  if (isCancel(save)) return handleCancel()
+  if (isCancel(save)) return handleCancel(lang)
 
-  if (save) {
-    writeOpencodeConfig(key, providerBlock)
-    outro(
-      pc.green(
-        `Tersimpan! Restart opencode, lalu pilih model via /models.`,
-      ),
-    )
-  } else {
-    outro(pc.yellow('Batal disimpan.'))
+    if (save) {
+      writeOpencodeConfig(key, providerBlock, lang)
+      outro(pc.green(t(lang, 'savedRestart')))
+    } else {
+      outro(pc.yellow(t(lang, 'saveCancelled')))
+    }
+
+    // ---------- Akhir proses: tanya apakah ingin mengulang ----------
+    {
+      const again = await confirm({
+        message: `${t(lang, 'repeatPrompt')} ${pc.dim(`(${t(lang, 'repeatHint')})`)}`,
+        initialValue: false,
+      })
+      if (isCancel(again)) return handleCancel(lang)
+      if (again) {
+        // tampilkan pemisah lalu kembali ke menu utama (appLoop)
+        log.message(pc.dim('─'.repeat(40)))
+        continue appLoop
+      }
+      break appLoop
+    }
   }
 }
 
-async function addNewProvider(config) {
+async function addNewProvider(config, lang) {
   const baseURL = await text({
-    message: 'Base URL provider (mis. https://9router.com/v1):',
-    placeholder: 'https://...',
-    validate: (v) => (v && v.trim() ? undefined : 'Base URL wajib diisi'),
+    message: t(lang, 'baseUrlPrompt'),
+    placeholder: t(lang, 'baseUrlPlaceholder'),
+    validate: (v) => (v && v.trim() ? undefined : t(lang, 'baseUrlRequired')),
   })
-  if (isCancel(baseURL)) return handleCancel()
+  if (isCancel(baseURL)) return handleCancel(lang)
 
   const apiKey = await password({
-    message: 'API key provider:',
-    validate: (v) => (v && v.trim() ? undefined : 'API key wajib diisi'),
+    message: t(lang, 'apiKeyPrompt'),
+    validate: (v) => (v && v.trim() ? undefined : t(lang, 'apiKeyRequired')),
   })
-  if (isCancel(apiKey)) return handleCancel()
+  if (isCancel(apiKey)) return handleCancel(lang)
 
   const name = await text({
-    message: 'Nama provider untuk opencode (mis. 9Router, DeepSeek, MyAPI):',
-    placeholder: '9Router',
-    validate: (v) => (v && v.trim() ? undefined : 'Nama wajib diisi'),
+    message: t(lang, 'providerNamePrompt'),
+    placeholder: t(lang, 'providerNamePlaceholder'),
+    validate: (v) => (v && v.trim() ? undefined : t(lang, 'providerNameRequired')),
   })
-  if (isCancel(name)) return handleCancel()
+  if (isCancel(name)) return handleCancel(lang)
 
   const provider = { name: name.trim(), baseURL: baseURL.trim(), apiKey: apiKey.trim() }
   upsertProvider(config, provider)
@@ -329,113 +492,110 @@ async function addNewProvider(config) {
   return provider
 }
 
-async function manageProviders() {
+async function manageProviders(lang) {
   let config = loadAppConfig()
   while (config.providers.length > 0) {
     const options = config.providers.map((p, i) => ({
       value: `edit:${i}`,
       label: `${p.name} — ${p.baseURL}`,
     }))
-    options.push({ value: 'done', label: pc.green('Selesai') })
+    options.push({ value: 'done', label: pc.green(t(lang, 'back')) })
 
     const pick = await select({
-      message: 'Pilih provider untuk dikelola:',
+      message: t(lang, 'managePick'),
       options,
     })
-    if (isCancel(pick)) return handleCancel()
+    if (isCancel(pick)) return handleCancel(lang)
     if (pick === 'done') break
 
     const idx = Number(pick.split(':')[1])
     const action = await select({
-      message: `Kelola "${config.providers[idx].name}":`,
+      message: t(lang, 'manageFor', { name: config.providers[idx].name }),
       options: [
-        { value: 'rename', label: 'Ubah nama' },
-        { value: 'url', label: 'Ubah base URL' },
-        { value: 'apikey', label: 'Ubah API key' },
-        { value: 'delete', label: pc.red('Hapus provider') },
-        { value: 'back', label: 'Kembali' },
+        { value: 'rename', label: t(lang, 'rename') },
+        { value: 'url', label: t(lang, 'editUrl') },
+        { value: 'apikey', label: t(lang, 'editApiKey') },
+        { value: 'delete', label: pc.red(t(lang, 'deleteProvider')) },
+        { value: 'back', label: pc.green(t(lang, 'back')) },
       ],
     })
-    if (isCancel(action)) return handleCancel()
+    if (isCancel(action)) return handleCancel(lang)
 
     if (action === 'back') continue
 
     if (action === 'rename') {
       const name = await text({
-        message: 'Nama baru:',
+        message: t(lang, 'newName'),
         initialValue: config.providers[idx].name,
-        validate: (v) => (v && v.trim() ? undefined : 'Nama wajib diisi'),
+        validate: (v) => (v && v.trim() ? undefined : t(lang, 'providerNameRequired')),
       })
-      if (isCancel(name)) return handleCancel()
+      if (isCancel(name)) return handleCancel(lang)
       updateProvider(config, idx, { name: name.trim() })
       saveAppConfig(config)
-      log.success(`Nama diubah menjadi "${name.trim()}"`)
+      log.success(t(lang, 'renamedTo', { name: name.trim() }))
     } else if (action === 'url') {
       const url = await text({
-        message: 'Base URL baru:',
+        message: t(lang, 'newUrl'),
         initialValue: config.providers[idx].baseURL,
-        validate: (v) => (v && v.trim() ? undefined : 'Base URL wajib diisi'),
+        validate: (v) => (v && v.trim() ? undefined : t(lang, 'baseUrlRequired')),
       })
-      if (isCancel(url)) return handleCancel()
+      if (isCancel(url)) return handleCancel(lang)
       updateProvider(config, idx, { baseURL: url.trim() })
       saveAppConfig(config)
-      log.success('Base URL diperbarui')
+      log.success(t(lang, 'urlUpdated'))
     } else if (action === 'apikey') {
       const key = await password({
-        message: 'API key baru:',
-        validate: (v) => (v && v.trim() ? undefined : 'API key wajib diisi'),
+        message: t(lang, 'newApiKey'),
+        validate: (v) => (v && v.trim() ? undefined : t(lang, 'apiKeyRequired')),
       })
-      if (isCancel(key)) return handleCancel()
+      if (isCancel(key)) return handleCancel(lang)
       updateProvider(config, idx, { apiKey: key.trim() })
       saveAppConfig(config)
-      log.success('API key diperbarui')
+      log.success(t(lang, 'apiKeyUpdated'))
     } else if (action === 'delete') {
       const ok = await confirm({
-        message: `Hapus provider "${config.providers[idx].name}"?`,
+        message: t(lang, 'deleteConfirm', { name: config.providers[idx].name }),
         initialValue: false,
       })
-      if (isCancel(ok)) return handleCancel()
+      if (isCancel(ok)) return handleCancel(lang)
       if (ok) {
         deleteProvider(config, idx)
         saveAppConfig(config)
-        log.success('Provider dihapus')
+        log.success(t(lang, 'providerDeleted'))
       }
     }
     config = loadAppConfig()
   }
 }
 
-async function manualReorder(models) {
+async function manualReorder(models, lang, numbering) {
   const list = [...models]
   while (true) {
-    log.message(pc.bold('Urutan saat ini:'))
-    list.forEach((m, i) => {
-      log.message(
-        `  ${String(i + 1).padStart(2, '0')}. ${m.id} ${pc.dim(`(skor ${m._score})`)}`,
-      )
-    })
+    {
+      const lines = list.map((m, i) => `  ${i + 1}. ${m.id} ${pc.dim(t(lang, 'scoreLabel', { score: m._score }))}`).join('\n')
+      log.message(`${pc.bold(t(lang, 'currentOrder'))}\n${lines}`)
+    }
 
     const action = await select({
-      message: 'Pilih model yang ingin dipindahkan (atau selesai):',
+      message: t(lang, 'pickToMove'),
       options: [
-        ...list.map((m, i) => ({ value: `move:${i}`, label: `Pindah: ${m.id}` })),
-        { value: 'done', label: pc.green('Selesai — lanjut') },
+        ...list.map((m, i) => ({ value: `move:${i}`, label: t(lang, 'moveLabel', { id: m.id }) })),
+        { value: 'done', label: pc.green(t(lang, 'doneContinue')) },
       ],
     })
-    if (isCancel(action)) return handleCancel()
+    if (isCancel(action)) return handleCancel(lang)
     if (action === 'done') break
 
     const idx = Number(action.split(':')[1])
     const target = await text({
-      message: `Pindah "${list[idx].id}" ke posisi berapa? (1-${list.length})`,
+      message: t(lang, 'moveToPosition', { id: list[idx].id, len: list.length }),
       validate: (v) => {
         const n = Number(v)
-        if (!Number.isInteger(n) || n < 1 || n > list.length)
-          return `Masukkan angka 1-${list.length}`
+        if (!Number.isInteger(n) || n < 1 || n > list.length) return t(lang, 'positionValidation', { len: list.length })
         return undefined
       },
     })
-    if (isCancel(target)) return handleCancel()
+    if (isCancel(target)) return handleCancel(lang)
 
     const pos = Number(target) - 1
     const [item] = list.splice(idx, 1)
@@ -444,12 +604,17 @@ async function manualReorder(models) {
   return list
 }
 
-function handleCancel() {
-  cancel('Dibatalkan.')
+function handleCancel(lang = 'en') {
+  cancel(t(lang, 'cancelled'))
   process.exit(0)
 }
 
 main().catch((err) => {
-  cancel(err.message ?? 'Terjadi kesalahan')
+  // try to use saved language for error message
+  let lang = 'en'
+  try {
+    lang = loadAppConfig().settings.language
+  } catch {}
+  cancel(err.message ?? t(lang, 'errorOccurred'))
   process.exit(1)
 })

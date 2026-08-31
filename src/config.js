@@ -1,17 +1,37 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { appConfigPath, ensureConfigDir } from './utils.js'
 
+export const DEFAULT_SETTINGS = {
+  language: 'en',
+  timeout: 15,
+  numbering: '01.',
+}
+
 export const DEFAULT_CONFIG = {
   providers: [],
+  settings: { ...DEFAULT_SETTINGS },
 }
 
 export function loadAppConfig() {
   try {
     const raw = readFileSync(appConfigPath(), 'utf8')
     const parsed = JSON.parse(raw)
-    return { ...DEFAULT_CONFIG, ...parsed }
+    const merged = { ...DEFAULT_CONFIG, ...parsed }
+    // deep merge settings with defaults (handle old configs)
+    merged.settings = { ...DEFAULT_SETTINGS, ...(parsed.settings ?? {}) }
+    // normalize
+    if (!['en', 'id'].includes(merged.settings.language)) merged.settings.language = DEFAULT_SETTINGS.language
+    if (!Number.isInteger(merged.settings.timeout) || merged.settings.timeout < 1 || merged.settings.timeout > 300) {
+      merged.settings.timeout = DEFAULT_SETTINGS.timeout
+    }
+    if (!['01.', '1.', '001.', '01 -', 'none'].includes(merged.settings.numbering)) {
+      merged.settings.numbering = DEFAULT_SETTINGS.numbering
+    }
+    // ensure providers is array
+    if (!Array.isArray(merged.providers)) merged.providers = []
+    return merged
   } catch {
-    return { ...DEFAULT_CONFIG }
+    return { providers: [], settings: { ...DEFAULT_SETTINGS } }
   }
 }
 
