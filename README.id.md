@@ -23,6 +23,14 @@ npm start
 node src/cli.js
 ```
 
+## Testing
+
+```bash
+npm test
+```
+
+Memakai runner bawaan `node:test` (tanpa dependensi tambahan). Mencakup parser JSONC (komentar/trailing comma), resolusi path config OpenCode, backup/atomic write, pemilihan endpoint (`chat`/`messages`/`responses`), header `x-opencode-session` untuk OpenCode Go/Zen, fallback `max_completion_tokens`, serta pembuatan blok model/npm.
+
 ## Build executable (Windows, macOS, Linux)
 
 Menggunakan [@yao-pkg/pkg](https://github.com/yao-pkg/pkg) — menghasilkan satu file executable tanpa perlu Node.js terpasang di mesin target.
@@ -96,11 +104,16 @@ Pengaturan disimpan di `~/.config/opencode-model-picker/config.json` bersama pro
 src/
 ├── cli.js        # alur interaktif (@clack/prompts) + i18n + pengaturan + outer loop (tidak auto-close) + spinner satu baris
 ├── i18n.js       # terjemahan (en/id) + gaya penomoran
-├── provider.js   # GET /v1/models + pemilihan endpoint (chat/messages/responses) + x-opencode-session Go + sanitasi satu baris + ekstrak inner error OpenRouter
+├── provider.js   # GET /v1/models + pemilihan endpoint (chat/messages/responses) + x-opencode-session Go + normalisasi capability + ekstrak inner error OpenRouter
 ├── scoring.js    # skor otomatis kemampuan coding
 ├── config.js     # simpan/muat config aplikasi (~/.config/opencode-model-picker/) + settings (language/timeout/numbering)
 ├── opencode.js   # merge aman ke config OpenCode (mendukung penomoran) + backup .bak + atomic write
 └── utils.js      # path sesuai OpenCode, parser JSONC (komentar + trailing comma), atomic write
+
+test/
+├── utils.test.js     # parser JSONC + resolusi path config
+├── provider.test.js  # pemilihan endpoint, header session, klasifikasi error
+└── opencode.test.js  # blok model/npm + backup/atomic write
 ```
 
 ## Catatan
@@ -109,6 +122,7 @@ src/
 - Path config OpenCode mengikuti OpenCode sendiri: `~/.config/opencode` di semua platform (termasuk Windows, via XDG), atau `$OPENCODE_CONFIG_DIR` bila diatur. Tool membaca JSONC dengan komentar dan trailing comma.
 - Backup `.bak` dibuat di sebelah config OpenCode setiap kali menyimpan, karena file ditulis ulang sebagai JSON biasa (komentar/format tidak dipertahankan).
 - Untuk provider campuran protokol, `npm` level provider diisi paket endpoint **mayoritas** (`@ai-sdk/openai-compatible` / `@ai-sdk/anthropic` / `@ai-sdk/openai`) dan model minoritas diberi override `provider.npm` per-model, sehingga sesedikit mungkin bergantung pada override per-model.
+- Bila provider tidak mengirim `capabilities`, capability disimpulkan dari `architecture`/`supported_parameters` (gaya OpenRouter/gateway), sehingga skor otomatis tetap punya data.
 - Spinner tes dipaksa satu baris per model (newline diringkas, dipotong 80 char) agar tidak spam terminal pada error verbose (mis. `openrouter/google/lyria-3-pro-preview`).
 - Jika tidak ada model yang berfungsi atau fetch gagal, aplikasi kembali ke menu utama, bukan keluar.
 - Setelah menulis ke opencode, **restart opencode** lalu pilih model via `/models`.

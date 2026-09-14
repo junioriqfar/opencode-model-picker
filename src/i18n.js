@@ -1,4 +1,3 @@
-export const SUPPORTED_LANGUAGES = ['en', 'id']
 export const DEFAULT_LANGUAGE = 'en'
 
 export const NUMBERING_STYLES = {
@@ -45,7 +44,6 @@ export const translations = {
     selectAll: 'Select all ({count} models)',
     selectCustom: 'Custom selection',
     selectModels: 'Select models to test (space to select, enter to continue):',
-    timeoutPrompt: 'Timeout per model (seconds):',
     timeoutValidation: 'Enter an integer between 1-300',
     checkingModels: 'Testing model access (this may take a while)...',
     checkDone: 'Check complete.',
@@ -90,7 +88,6 @@ export const translations = {
 
     // manage providers
     managePick: 'Select provider to manage:',
-    manageDone: 'Done',
     manageFor: 'Manage "{name}":',
     rename: 'Edit name',
     editUrl: 'Edit base URL',
@@ -177,7 +174,6 @@ export const translations = {
     selectAll: 'Pilih semua ({count} model)',
     selectCustom: 'Pilih custom',
     selectModels: 'Pilih model yang akan dicek (spasi untuk pilih, enter untuk lanjut):',
-    timeoutPrompt: 'Timeout per model (detik):',
     timeoutValidation: 'Masukkan angka bulat antara 1-300',
     checkingModels: 'Mengecek akses model (mungkin butuh beberapa saat)...',
     checkDone: 'Pengecekan selesai.',
@@ -216,7 +212,6 @@ export const translations = {
     providerNameRequired: 'Nama wajib diisi',
 
     managePick: 'Pilih provider untuk dikelola:',
-    manageDone: 'Selesai',
     manageFor: 'Kelola "{name}":',
     rename: 'Ubah nama',
     editUrl: 'Ubah base URL',
@@ -283,8 +278,4 @@ export function t(lang, key, params = {}) {
     str = str.replaceAll(`{${k}}`, String(v))
   }
   return str
-}
-
-export function getTranslator(lang) {
-  return (key, params) => t(lang, key, params)
 }

@@ -23,6 +23,14 @@ npm start
 node src/cli.js
 ```
 
+## Testing
+
+```bash
+npm test
+```
+
+Uses the built-in `node:test` runner (no extra dependencies). Covers the JSONC parser (comments/trailing commas), OpenCode config path resolution, backup/atomic write, endpoint selection (`chat`/`messages`/`responses`), the `x-opencode-session` header for OpenCode Go/Zen, `max_completion_tokens` fallback, and model-block/npm generation.
+
 ## Build Executable (Windows, macOS, Linux)
 
 Built with [@yao-pkg/pkg](https://github.com/yao-pkg/pkg) — produces a single executable file with no Node.js runtime required on the target machine.
@@ -96,11 +104,16 @@ Settings are stored in `~/.config/opencode-model-picker/config.json` alongside s
 src/
 ├── cli.js        # interactive flow (@clack/prompts) + i18n + settings + outer loop (no auto-close) + single-line spinner
 ├── i18n.js       # translations (en/id) + numbering styles
-├── provider.js   # GET /v1/models + endpoint selection (chat/messages/responses) + Go x-opencode-session + single-line sanitization + OpenRouter inner error extraction
+├── provider.js   # GET /v1/models + endpoint selection (chat/messages/responses) + Go x-opencode-session + capability normalization + OpenRouter inner error extraction
 ├── scoring.js    # auto scoring for coding capability
 ├── config.js     # app config load/save (~/.config/opencode-model-picker/) + settings (language/timeout/numbering)
 ├── opencode.js   # safe merge into OpenCode config (numbering-aware) + .bak backup + atomic write
 └── utils.js      # OpenCode-compatible paths, JSONC parser (comments + trailing commas), atomic write
+
+test/
+├── utils.test.js     # JSONC parser + config path resolution
+├── provider.test.js  # endpoint selection, session header, error classification
+└── opencode.test.js  # model block/npm + backup/atomic write
 ```
 
 ## Notes
@@ -109,6 +122,7 @@ src/
 - OpenCode config path follows OpenCode itself: `~/.config/opencode` on all platforms (Windows included, via XDG), or `$OPENCODE_CONFIG_DIR` when set. The tool reads JSONC with comments and trailing commas.
 - A `.bak` backup is created next to the OpenCode config before every save, since the file is rewritten as plain JSON (comments/formatting are not preserved).
 - For providers mixing protocols, the provider-level `npm` is set to the **majority** endpoint's package (`@ai-sdk/openai-compatible` / `@ai-sdk/anthropic` / `@ai-sdk/openai`) and the minority models get a per-model `provider.npm` override, so as little as possible depends on per-model overrides.
+- When a provider omits `capabilities`, they are inferred from `architecture`/`supported_parameters` (OpenRouter/gateway style), so auto-scoring still has data to work with.
 - Test spinner is forced to one line per model (newlines collapsed, truncated to 80 chars) to avoid spamming the terminal on verbose provider errors (e.g. `openrouter/google/lyria-3-pro-preview`).
 - If no model works or fetch fails, the app returns to the main menu instead of exiting.
 - After writing to OpenCode, **restart opencode** and select the model via `/models`.

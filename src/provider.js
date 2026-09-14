@@ -9,7 +9,7 @@ function oneLine(str, max = 120) {
 const TEST_MESSAGE = 'Say hi'
 const TEST_MAX_TOKENS = 16
 const TEST_TIMEOUT = 15000
-const PICKER_USER_AGENT = 'opencode-model-picker/1.2.2'
+const PICKER_USER_AGENT = 'opencode-model-picker/1.3.0'
 const PICKER_CLIENT_NAME = 'opencode-model-picker'
 
 // Stable session id per process. OpenCode Go (since 2026-09-06) requires a
@@ -100,21 +100,47 @@ export async function listModels({ baseURL, apiKey, lang = 'en' }) {
 }
 
 function normalizeModel(m) {
+  // Sebagian provider tidak mengirim `capabilities`, tetapi menyertakan
+  // `architecture` / `supported_parameters` (gaya OpenRouter / gateways).
+  const inputModalities = Array.isArray(m.architecture?.input_modalities)
+    ? m.architecture.input_modalities.map((x) => String(x).toLowerCase())
+    : []
+  const outputModalities = Array.isArray(m.architecture?.output_modalities)
+    ? m.architecture.output_modalities.map((x) => String(x).toLowerCase())
+    : []
+  const supported = Array.isArray(m.supported_parameters)
+    ? m.supported_parameters.map((x) => String(x).toLowerCase())
+    : []
+  const modality = String(m.architecture?.modality ?? '').toLowerCase()
+
+  const hasImageInput =
+    inputModalities.includes('image') || modality.includes('image') || modality.includes('vision')
+  const audioInput = inputModalities.includes('audio')
+  const videoInput = inputModalities.includes('video')
+  const imageOutput = outputModalities.includes('image') || modality.includes('image->')
+
   return {
     id: m.id,
     ownedBy: m.owned_by ?? null,
-    contextLength: m.context_length ?? m.contextWindow ?? null,
-    maxOutput: m.max_completion_tokens ?? m.maxOutput ?? null,
+    contextLength: m.context_length ?? m.contextWindow ?? m.top_provider?.context_length ?? null,
+    maxOutput:
+      m.max_completion_tokens ??
+      m.maxOutput ??
+      m.top_provider?.max_completion_tokens ??
+      null,
     capabilities: {
-      vision: !!m.capabilities?.vision,
-      tools: !!m.capabilities?.tools,
-      reasoning: !!m.capabilities?.reasoning,
-      audioInput: !!m.capabilities?.audioInput,
-      audioOutput: !!m.capabilities?.audioOutput,
-      videoInput: !!m.capabilities?.videoInput,
-      imageOutput: !!m.capabilities?.imageOutput,
-      search: !!m.capabilities?.search,
-      pdf: !!m.capabilities?.pdf,
+      vision: !!(m.capabilities?.vision ?? hasImageInput),
+      tools: !!(m.capabilities?.tools ?? supported.includes('tools') ?? false),
+      reasoning: !!(
+        m.capabilities?.reasoning ??
+        (supported.includes('reasoning') || supported.includes('include_reasoning'))
+      ),
+      audioInput: !!(m.capabilities?.audioInput ?? audioInput),
+      audioOutput: !!(m.capabilities?.audioOutput ?? outputModalities.includes('audio')),
+      videoInput: !!(m.capabilities?.videoInput ?? videoInput),
+      imageOutput: !!(m.capabilities?.imageOutput ?? imageOutput),
+      search: !!(m.capabilities?.search ?? supported.includes('web_search')),
+      pdf: !!(m.capabilities?.pdf ?? supported.includes('file')),
     },
   }
 }

@@ -1,5 +1,5 @@
-import { readFileSync, copyFileSync } from 'node:fs'
-import { opencodeConfigPath, parseJsonc, writeFileAtomic } from './utils.js'
+import { copyFileSync } from 'node:fs'
+import { opencodeConfigPath, parseJsonc, readFileSafe, writeFileAtomic } from './utils.js'
 import { t, formatNumber } from './i18n.js'
 
 export function readOpencodeConfig(lang = 'en') {
@@ -13,14 +13,6 @@ export function readOpencodeConfig(lang = 'en') {
     return { config, path, exists: true }
   } catch (err) {
     throw new Error(t(lang, 'errParseConfig', { path, msg: err.message }))
-  }
-}
-
-function readFileSafe(path) {
-  try {
-    return readFileSync(path, 'utf8')
-  } catch {
-    return null
   }
 }
 
@@ -125,15 +117,4 @@ export function writeOpencodeConfig(providerKey, providerBlock, lang = 'en') {
   const out = JSON.stringify(config, null, 2) + '\n'
   writeFileAtomic(path, out)
   return { path, backupPath: backedUp ? backupPath : null }
-}
-
-export function previewConfig(providerKey, providerBlock, lang = 'en') {
-  const { config } = readOpencodeConfig(lang)
-  if (!config.provider) config.provider = {}
-  const existing = config.provider[providerKey]
-  config.provider[providerKey] = {
-    ...(existing ?? {}),
-    ...providerBlock,
-  }
-  return JSON.stringify(config, null, 2)
 }
