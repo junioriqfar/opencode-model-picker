@@ -24,6 +24,7 @@ import { listModels, testModel, sleep } from './provider.js'
 import { attachScores, sortByScore } from './scoring.js'
 import {
   buildModelsBlock,
+  pickProviderNpm,
   writeOpencodeConfig,
   readOpencodeConfig,
   providerExists,
@@ -290,7 +291,7 @@ async function main() {
   // ---------- 5. Rekap hasil ----------
   const okModels = results
     .filter((r) => r.result.ok)
-    .map((r) => ({ ...r.model, _testResult: r.result }))
+    .map((r) => ({ ...r.model, _testResult: r.result, api: r.result.api ?? 'chat' }))
   const deadModels = results.filter((r) => !r.result.ok && r.result.dead)
   const warnModels = results.filter((r) => !r.result.ok && !r.result.dead)
 
@@ -394,11 +395,22 @@ async function main() {
     }
   }
 
-  const ordered = ranked.map((m) => ({ id: m.id, shortName: shortNames[m.id], vision: m.capabilities.vision }))
+  const ordered = ranked.map((m) => ({
+    id: m.id,
+    shortName: shortNames[m.id],
+    vision: m.capabilities.vision,
+    api: m.api ?? m._testResult?.api ?? 'chat',
+  }))
 
-  const modelsBlock = buildModelsBlock(ordered, { paidIds, markPaid, numbering: config.settings.numbering })
+  const providerNpm = pickProviderNpm(ordered)
+  const modelsBlock = buildModelsBlock(ordered, {
+    paidIds,
+    markPaid,
+    numbering: config.settings.numbering,
+    defaultNpm: providerNpm,
+  })
   const providerBlock = {
-    npm: '@ai-sdk/openai-compatible',
+    npm: providerNpm,
     name: provider.name,
     options: {
       baseURL: provider.baseURL,
@@ -442,7 +454,8 @@ async function main() {
   if (isCancel(save)) return handleCancel(lang)
 
     if (save) {
-      writeOpencodeConfig(key, providerBlock, lang)
+      const { backupPath } = writeOpencodeConfig(key, providerBlock, lang)
+      if (backupPath) log.info(pc.dim(t(lang, 'backupCreated', { path: backupPath })))
       outro(pc.green(t(lang, 'savedRestart')))
     } else {
       outro(pc.yellow(t(lang, 'saveCancelled')))

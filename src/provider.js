@@ -1,4 +1,5 @@
 import { t } from './i18n.js'
+import { randomUUID } from 'node:crypto'
 
 function oneLine(str, max = 120) {
   if (!str) return ''
@@ -8,6 +9,45 @@ function oneLine(str, max = 120) {
 const TEST_MESSAGE = 'Say hi'
 const TEST_MAX_TOKENS = 16
 const TEST_TIMEOUT = 15000
+const PICKER_USER_AGENT = 'opencode-model-picker/1.2.1'
+const PICKER_CLIENT_NAME = 'opencode-model-picker'
+
+// Stable session id per process. OpenCode Go (since 2026-09-06) requires a
+// stable `x-opencode-session` header per conversation for routing + prompt
+// caching. Without it every /chat/completions (and /messages, /responses)
+// fails with 400 MissingSessionID:
+// "Error from provider (Console Go): Request is missing x-opencode-session..."
+let _cachedSessionId = null
+export function getPickerSessionId() {
+  if (!_cachedSessionId) {
+    try {
+      _cachedSessionId = `omp-${randomUUID()}`
+    } catch {
+      _cachedSessionId = `omp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+    }
+  }
+  return _cachedSessionId
+}
+
+export function isOpencodeZen(baseURL) {
+  const u = String(baseURL ?? '').toLowerCase()
+  return u.includes('opencode.ai') && (u.includes('/zen') || u.includes('/go/'))
+}
+
+function buildApiHeaders(apiKey, baseURL, extra = {}) {
+  const headers = {
+    Authorization: `Bearer ${apiKey}`,
+    'Content-Type': 'application/json',
+    'User-Agent': PICKER_USER_AGENT,
+    ...extra,
+  }
+  if (isOpencodeZen(baseURL)) {
+    // Required by OpenCode Go/Zen, see https://opencode.ai/docs/go/#where-can-i-use-it
+    headers['x-opencode-session'] = getPickerSessionId()
+    headers['x-opencode-client'] = PICKER_CLIENT_NAME
+  }
+  return headers
+}
 
 export function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -16,6 +56,13 @@ export function sleep(ms) {
 function normalizeModelURL(baseURL) {
   let url = baseURL.trim()
   url = url.replace(/\/+$/, '')
+  // Kalau user paste full endpoint (mis. .../v1/chat/completions), strip ke .../v1
+  for (const suffix of ['/chat/completions', '/responses', '/messages', '/models']) {
+    if (url.toLowerCase().endsWith(suffix)) {
+      url = url.slice(0, -suffix.length).replace(/\/+$/, '')
+      break
+    }
+  }
   if (url.endsWith('/v1')) return url
   return url + '/v1'
 }
@@ -37,7 +84,7 @@ export async function listModels({ baseURL, apiKey, lang = 'en' }) {
     url,
     {
       method: 'GET',
-      headers: { Authorization: `Bearer ${apiKey}` },
+      headers: buildApiHeaders(apiKey, baseURL, { Accept: 'application/json' }),
     },
     30000,
   )
@@ -82,6 +129,227 @@ function looksLikeHtml(text) {
   )
 }
 
+async function parseJsonBody(res) {
+  const contentType = res.headers.get('content-type') ?? ''
+  const text = await res.text()
+  let json = null
+  if (contentType.includes('application/json') || text.trim().startsWith('{')) {
+    try {
+      json = text ? JSON.parse(text) : null
+    } catch {
+      json = null
+    }
+  }
+  return { json, text }
+}
+
+function timeoutResult(timeoutMs, lang) {
+  return {
+    ok: false,
+    status: 'timeout',
+    error: 'timeout',
+    message: t(lang, 'errTimeout', { sec: Math.round(timeoutMs / 1000) }),
+    dead: false,
+  }
+}
+
+function networkResult(err, lang) {
+  return {
+    ok: false,
+    status: 'network',
+    error: 'network',
+    message: t(lang, 'errNetwork', { msg: oneLine(err.message ?? t(lang, 'errUnknown'), 100) }),
+    dead: false,
+  }
+}
+
+async function attemptChat({ baseURL, apiKey, model, timeoutMs, lang }) {
+  const url = `${normalizeModelURL(baseURL)}/chat/completions`
+  try {
+    const res = await fetchWithTimeout(
+      url,
+      {
+        method: 'POST',
+        headers: buildApiHeaders(apiKey, baseURL),
+        body: JSON.stringify({
+          model,
+          messages: [{ role: 'user', content: TEST_MESSAGE }],
+          max_tokens: TEST_MAX_TOKENS,
+          stream: false,
+        }),
+      },
+      timeoutMs,
+    )
+    const { json, text } = await parseJsonBody(res)
+
+    if (looksLikeHtml(text)) {
+      return {
+        ok: false,
+        status: res.status,
+        error: 'html',
+        message: t(lang, 'errHtmlResponse'),
+        detail: oneLine(text, 200),
+        dead: false,
+      }
+    }
+
+    if (!res.ok) {
+      return classifyError(model, res.status, json, text, lang)
+    }
+
+    // Respons 200 tapi bentuknya error (mis. {"error":{...}})
+    if (json && json.error && !json.choices) {
+      return classifyError(model, 200, json, text, lang)
+    }
+
+    const content = json?.choices?.[0]?.message?.content ?? null
+    if (content === null || content === undefined) {
+      return {
+        ok: true,
+        status: res.status,
+        api: 'chat',
+        message: 'Respons kosong (mungkin token habis untuk reasoning)',
+        warning: true,
+        detail: oneLine(text, 200),
+      }
+    }
+    return { ok: true, status: res.status, api: 'chat', message: 'OK', warning: false, detail: null }
+  } catch (err) {
+    if (err.name === 'AbortError') return timeoutResult(timeoutMs, lang)
+    return networkResult(err, lang)
+  }
+}
+
+// OpenCode Go serves MiniMax/Qwen via Anthropic Messages:
+// POST {base}/messages  (sdk: @ai-sdk/anthropic)
+// https://opencode.ai/docs/go/#endpoints
+async function attemptMessages({ baseURL, apiKey, model, timeoutMs, lang }) {
+  const url = `${normalizeModelURL(baseURL)}/messages`
+  try {
+    const res = await fetchWithTimeout(
+      url,
+      {
+        method: 'POST',
+        headers: {
+          ...buildApiHeaders(apiKey, baseURL, { 'anthropic-version': '2023-06-01' }),
+          'x-api-key': apiKey,
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: TEST_MAX_TOKENS,
+          messages: [{ role: 'user', content: TEST_MESSAGE }],
+        }),
+      },
+      timeoutMs,
+    )
+    const { json, text } = await parseJsonBody(res)
+
+    if (looksLikeHtml(text)) {
+      return {
+        ok: false,
+        status: res.status,
+        error: 'html',
+        message: t(lang, 'errHtmlResponse'),
+        detail: oneLine(text, 200),
+        dead: false,
+      }
+    }
+    if (!res.ok) {
+      return classifyError(model, res.status, json, text, lang)
+    }
+    if (json && json.error && !json.content) {
+      return classifyError(model, 200, json, text, lang)
+    }
+    // Anthropic shape: { content: [{ type:'text', text:'...' }], ... }
+    const blocks = json?.content
+    const hasContent =
+      (Array.isArray(blocks) && blocks.length > 0) ||
+      typeof json?.output_text === 'string' ||
+      typeof json?.completion === 'string'
+    if (!hasContent) {
+      return {
+        ok: true,
+        status: res.status,
+        api: 'messages',
+        message: 'Respons kosong (mungkin token habis untuk reasoning)',
+        warning: true,
+        detail: oneLine(text, 200),
+      }
+    }
+    return { ok: true, status: res.status, api: 'messages', message: 'OK', warning: false, detail: null }
+  } catch (err) {
+    if (err.name === 'AbortError') return timeoutResult(timeoutMs, lang)
+    return networkResult(err, lang)
+  }
+}
+
+// OpenCode Go serves Grok / GPT Luna / Muse Spark via Responses:
+// POST {base}/responses  (sdk: @ai-sdk/openai)
+async function attemptResponses({ baseURL, apiKey, model, timeoutMs, lang }) {
+  const url = `${normalizeModelURL(baseURL)}/responses`
+  try {
+    const res = await fetchWithTimeout(
+      url,
+      {
+        method: 'POST',
+        headers: buildApiHeaders(apiKey, baseURL),
+        body: JSON.stringify({
+          model,
+          input: TEST_MESSAGE,
+          max_output_tokens: TEST_MAX_TOKENS,
+        }),
+      },
+      timeoutMs,
+    )
+    const { json, text } = await parseJsonBody(res)
+
+    if (looksLikeHtml(text)) {
+      return {
+        ok: false,
+        status: res.status,
+        error: 'html',
+        message: t(lang, 'errHtmlResponse'),
+        detail: oneLine(text, 200),
+        dead: false,
+      }
+    }
+    if (!res.ok) {
+      return classifyError(model, res.status, json, text, lang)
+    }
+    if (json && json.error && !json.output && !json.choices) {
+      return classifyError(model, 200, json, text, lang)
+    }
+    return { ok: true, status: res.status, api: 'responses', message: 'OK', warning: false, detail: null }
+  } catch (err) {
+    if (err.name === 'AbortError') return timeoutResult(timeoutMs, lang)
+    return networkResult(err, lang)
+  }
+}
+
+// Tebak endpoint Go yang benar dari nama model (lihat tabel di https://opencode.ai/docs/go/#endpoints)
+// sehingga minimax/qwen langsung dites via /messages dan muse-spark/grok/luna via /responses.
+function guessGoApi(modelId) {
+  const id = String(modelId ?? '').toLowerCase()
+  if (id.includes('minimax') || id.includes('qwen')) return 'messages'
+  if (id.includes('muse-spark') || id.includes('muse_spark') || id.includes('grok') || id.includes('luna')) {
+    return 'responses'
+  }
+  return 'chat'
+}
+
+export function getGoNpmForApi(api) {
+  if (api === 'messages') return '@ai-sdk/anthropic'
+  if (api === 'responses') return '@ai-sdk/openai'
+  return '@ai-sdk/openai-compatible'
+}
+
+function shouldTryOtherGoEndpoints(result) {
+  // Timeout / network / rate-limit / auth / payment / session / html:
+  // coba endpoint lain tidak akan membantu (atau sudah di-retry).
+  if (!result || result.ok) return false
+  return !['timeout', 'network', 'ratelimit', 'auth', 'payment', 'session', 'html'].includes(result.error)
+}
+
 export async function testModel({
   baseURL,
   apiKey,
@@ -90,94 +358,59 @@ export async function testModel({
   retryOn429 = true,
   lang = 'en',
 }) {
-  const url = `${normalizeModelURL(baseURL)}/chat/completions`
-
-  const attempt = async () => {
-    try {
-      const res = await fetchWithTimeout(
-        url,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model,
-            messages: [{ role: 'user', content: TEST_MESSAGE }],
-            max_tokens: TEST_MAX_TOKENS,
-            stream: false,
-          }),
-        },
-        timeoutMs,
-      )
-      const contentType = res.headers.get('content-type') ?? ''
-      const text = await res.text()
-
-      let json = null
-      if (contentType.includes('application/json') || text.trim().startsWith('{')) {
-        try {
-          json = text ? JSON.parse(text) : null
-        } catch {
-          json = null
-        }
-      }
-
-      if (looksLikeHtml(text)) {
-        return {
-          ok: false,
-          status: res.status,
-          error: 'html',
-          message: t(lang, 'errHtmlResponse'),
-          detail: oneLine(text, 200),
-          dead: false,
-        }
-      }
-
-      if (!res.ok) {
-        return classifyError(model, res.status, json, text, lang)
-      }
-
-      // Respons 200 tapi bentuknya error (mis. {"error":{...}})
-      if (json && json.error && !json.choices) {
-        return classifyError(model, 200, json, text, lang)
-      }
-
-      const content = json?.choices?.[0]?.message?.content ?? null
-      if (content === null || content === undefined) {
-        return {
-          ok: true,
-          status: res.status,
-          message: 'Respons kosong (mungkin token habis untuk reasoning)',
-          warning: true,
-          detail: oneLine(text, 200),
-        }
-      }
-      return { ok: true, status: res.status, message: 'OK', warning: false, detail: null }
-    } catch (err) {
-      if (err.name === 'AbortError') {
-        return {
-          ok: false,
-          status: 'timeout',
-          error: 'timeout',
-          message: t(lang, 'errTimeout', { sec: Math.round(timeoutMs / 1000) }),
-          dead: false,
-        }
-      }
-      return {
-        ok: false,
-        status: 'network',
-        error: 'network',
-        message: t(lang, 'errNetwork', { msg: oneLine(err.message ?? t(lang, 'errUnknown'), 100) }),
-        dead: false,
-      }
-    }
+  const attemptByApi = {
+    chat: () => attemptChat({ baseURL, apiKey, model, timeoutMs, lang }),
+    messages: () => attemptMessages({ baseURL, apiKey, model, timeoutMs, lang }),
+    responses: () => attemptResponses({ baseURL, apiKey, model, timeoutMs, lang }),
   }
 
-  let result = await attempt()
+  // Provider biasa (bukan Go): cukup /chat/completions seperti sebelumnya.
+  if (!isOpencodeZen(baseURL)) {
+    let result = await attemptByApi.chat()
+    if (!result.ok && result.error === 'ratelimit' && retryOn429) {
+      await sleep(1500)
+      result = await attemptByApi.chat()
+    }
+    return result
+  }
+
+  // OpenCode Go/Zen: coba endpoint tebakan dulu, fallback ke 2 lainnya.
+  const first = guessGoApi(model)
+  const order = [first, ...['chat', 'messages', 'responses'].filter((a) => a !== first)]
+
+  let firstResult = null
+  for (const api of order) {
+    let result = await attemptByApi[api]()
+    if (result.ok) return result
+    if (api === first) firstResult = result
+    // Missing session header: semua endpoint akan gagal sama -> langsung kembalikan.
+    if (result.error === 'session') return result
+    if (!shouldTryOtherGoEndpoints(result)) {
+      if (result.error === 'ratelimit' && retryOn429) {
+        await sleep(1500)
+        const retry = await attemptByApi[api]()
+        if (retry.ok) return retry
+        result = retry
+        if (api === first) firstResult = result
+      }
+      // Untuk error non-fallback (timeout/network/auth/dll) kembalikan hasil endpoint utama
+      // kecuali endpoint utama sudah dicoba dan ini endpoint lain yang juga gagal -> lanjut?
+      // Sederhananya: jika endpoint tebakan gagal dengan error non-fallback, jangan tebak lain.
+      if (api === first) return result
+      continue
+    }
+    // Simpan hasil pertama untuk fallback pesan jika semua gagal
+    if (!firstResult) firstResult = result
+  }
+
+  // Semua endpoint gagal. Kembalikan hasil endpoint tebakan (paling relevan),
+  // supaya pesan error sesuai dengan modelnya (mis. minimax -> hasil /messages).
+  // Jika karena alasan tertentu firstResult hilang, coba ulang endpoint pertama sekali lagi untuk pesan.
+  if (firstResult) return firstResult
+  let result = await attemptByApi[first]()
   if (!result.ok && result.error === 'ratelimit' && retryOn429) {
     await sleep(1500)
-    result = await attempt()
+    result = await attemptByApi[first]()
   }
   return result
 }
@@ -185,7 +418,9 @@ export async function testModel({
 function classifyError(model, status, json, text, lang = 'en') {
   let detail = ''
   if (typeof json?.error === 'string') detail = json.error
-  else detail = json?.error?.message ?? text ?? ''
+  else detail = json?.error?.message ?? json?.message ?? text ?? ''
+  // OpenCode Go MissingSessionID shape: {"type":"MissingSessionID","message":"Error from provider..."}
+  const errType = String(json?.type ?? json?.error?.type ?? '').toLowerCase()
   let lower = detail.toLowerCase()
 
   // OpenRouter wraps provider errors: {"error":{"message":"Provider returned error","metadata":{"raw":"{\n  \"error\":...}"}}}
@@ -213,6 +448,25 @@ function classifyError(model, status, json, text, lang = 'en') {
   }
   detail = effectiveDetail
   lower = effectiveLower
+
+  // OpenCode Go sejak 2026-09-06 wajib kirim `x-opencode-session`.
+  // Tanpa itu: 400 MissingSessionID. Ini BUKAN model mati — jangan tandai dead.
+  // Tool versi baru sudah mengirim header otomatis, jadi kalau masih muncul
+  // berarti tool belum update atau ada proxy yang strip header.
+  const isMissingSession =
+    errType.includes('missingsessionid') ||
+    lower.includes('missingsessionid') ||
+    lower.includes('x-opencode-session')
+  if (isMissingSession) {
+    return {
+      ok: false,
+      status,
+      error: 'session',
+      message: t(lang, 'errSession', { detail: oneLine(detail, 100) }),
+      detail: oneLine(detail, 200),
+      dead: false,
+    }
+  }
 
   const status410 = status === 410
   const isEOL =

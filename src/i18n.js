@@ -23,6 +23,7 @@ export const translations = {
     errorOccurred: 'An error occurred',
     savedRestart: 'Saved! Restart opencode, then select model via /models.',
     saveCancelled: 'Save cancelled.',
+    backupCreated: 'Backup of previous config: {path}',
 
     // main menu
     actionUse: 'Use saved provider',
@@ -146,6 +147,7 @@ export const translations = {
     errPayment: 'Payment required / subscription needed',
     errBadRequest: 'Bad request / unsupported model (permanent)',
     errRateLimit: 'Rate limited (temporary)',
+    errSession: 'Missing x-opencode-session (update tool / check proxy): {detail}',
     errParseConfig: 'Failed to parse {path}: {msg}\nPlease fix the file first.',
     errUnknown: 'Unknown error',
   },
@@ -156,6 +158,7 @@ export const translations = {
     errorOccurred: 'Terjadi kesalahan',
     savedRestart: 'Tersimpan! Restart opencode, lalu pilih model via /models.',
     saveCancelled: 'Batal disimpan.',
+    backupCreated: 'Backup konfigurasi sebelumnya: {path}',
 
     actionUse: 'Gunakan provider tersimpan',
     actionManage: 'Kelola provider tersimpan',
@@ -267,6 +270,7 @@ export const translations = {
     errPayment: 'Perlu pembayaran / langganan dibutuhkan',
     errBadRequest: 'Bad request / model tidak didukung (permanen)',
     errRateLimit: 'Rate limited (sementara)',
+    errSession: 'Missing x-opencode-session (update tool / cek proxy): {detail}',
     errParseConfig: 'Gagal memparsing {path}: {msg}\nPerbaiki file tersebut terlebih dahulu.',
     errUnknown: 'Error tak dikenal',
   },

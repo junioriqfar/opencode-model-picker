@@ -72,7 +72,7 @@ Semua pengaturan langsung disimpan dan dipakai untuk sesi saat itu.
 7. **Edit manual** — opsional urutkan ulang via `Pilih model yang ingin dipindahkan → Pindah ke posisi (1-N)`. Urutan saat ini juga tampil sebagai `1. id (skor 85)` dalam satu blok.
 8. **Nama tampilan** — pilih nama pendek otomatis (ambil bagian terakhir ID) atau isi manual per model. Nomor urut dibuat otomatis dari posisi menggunakan **Pengaturan → Gaya penomoran** (mis. `01.`, `1.`, `001.`, `01 -`, atau `tanpa nomor`).
 9. **Preview** — daftar nama + blok konfigurasi ditampilkan untuk dicek sebelum disimpan.
-10. **Simpan** — tulis ke `~/.config/opencode/opencode.jsonc` (macOS/Linux) atau `%APPDATA%\opencode\` (Windows), dengan merge aman yang mempertahankan konfigurasi lain. Jika nama provider **sudah ada**, aplikasi memberi peringatan bahwa semua model lama di provider tersebut akan dihapus dan diganti dengan daftar saat ini.
+10. **Simpan** — mengikuti resolusi config milik OpenCode: pilih file pertama yang ada dari `opencode.jsonc` → `opencode.json` → `config.json` di dalam `~/.config/opencode` (atau `$OPENCODE_CONFIG_DIR` bila diatur), default `opencode.jsonc`. Backup `.bak` dibuat sebelum menyimpan; konfigurasi lain dipertahankan, tetapi komentar JSONC dan format asli tidak. Jika nama provider **sudah ada**, aplikasi memberi peringatan bahwa semua model lama di provider tersebut akan dihapus dan diganti dengan daftar saat ini.
 11. **Ulang** — setelah simpan/batal, aplikasi bertanya **Apakah ingin mengulang?** (`Jika ya, akan kembali ke menu utama.`). Jika **Ya**, loop kembali ke *Aksi awal*; jika **Tidak**, keluar.
 
 ## Pengaturan
@@ -99,13 +99,15 @@ src/
 ├── provider.js   # GET /v1/models + test /v1/chat/completions + sanitasi satu baris + ekstrak inner error OpenRouter
 ├── scoring.js    # skor otomatis kemampuan coding
 ├── config.js     # simpan/muat config aplikasi (~/.config/opencode-model-picker/) + settings (language/timeout/numbering)
-├── opencode.js   # merge aman ke opencode.jsonc (mendukung penomoran)
-└── utils.js      # path cross-platform, parser JSONC
+├── opencode.js   # merge aman ke config OpenCode (mendukung penomoran) + backup .bak + atomic write
+└── utils.js      # path sesuai OpenCode, parser JSONC (komentar + trailing comma), atomic write
 ```
 
 ## Catatan
 
 - Config aplikasi (provider tersimpan + pengaturan) disimpan di `~/.config/opencode-model-picker/config.json` (API key plain text — jaga file ini).
+- Path config OpenCode mengikuti OpenCode sendiri: `~/.config/opencode` di semua platform (termasuk Windows, via XDG), atau `$OPENCODE_CONFIG_DIR` bila diatur. Tool membaca JSONC dengan komentar dan trailing comma.
+- Backup `.bak` dibuat di sebelah config OpenCode setiap kali menyimpan, karena file ditulis ulang sebagai JSON biasa (komentar/format tidak dipertahankan).
 - Spinner tes dipaksa satu baris per model (newline diringkas, dipotong 80 char) agar tidak spam terminal pada error verbose (mis. `openrouter/google/lyria-3-pro-preview`).
 - Jika tidak ada model yang berfungsi atau fetch gagal, aplikasi kembali ke menu utama, bukan keluar.
 - Setelah menulis ke opencode, **restart opencode** lalu pilih model via `/models`.

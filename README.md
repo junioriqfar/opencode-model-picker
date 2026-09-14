@@ -72,7 +72,7 @@ All settings are saved immediately and applied to the current session.
 7. **Manual edit** — optionally reorder via `Select model to move → Move to position (1-N)`. Current order is also shown as `1. id (score 85)` in one block.
 8. **Display name** — choose auto short names (take the last segment of the ID) or enter them manually per model. Sequence numbers are auto-generated from position using the **Settings → Numbering style** (e.g. `01.`, `1.`, `001.`, `01 -`, or `none`).
 9. **Preview** — name list + configuration block are shown for review before saving.
-10. **Save** — writes to `~/.config/opencode/opencode.jsonc` (macOS/Linux) or `%APPDATA%\opencode\` (Windows), with a safe merge that preserves other configuration. If the provider name **already exists**, the app warns that all existing models for that provider will be deleted and replaced with the current list.
+10. **Save** — follows OpenCode's own config resolution: picks the first existing file of `opencode.jsonc` → `opencode.json` → `config.json` inside `~/.config/opencode` (or `$OPENCODE_CONFIG_DIR` when set), defaulting to `opencode.jsonc`. A `.bak` backup is written before saving; other configuration is preserved, but JSONC comments and original formatting are not. If the provider name **already exists**, the app warns that all existing models for that provider will be deleted and replaced with the current list.
 11. **Repeat** — after save/cancel, the app asks **Do you want to run again?** (`If yes, you will return to the main menu.`). If **Yes**, it loops back to *Initial action*; if **No** (or Enter), it exits.
 
 ## Settings
@@ -99,13 +99,15 @@ src/
 ├── provider.js   # GET /v1/models + test /v1/chat/completions + single-line sanitization + OpenRouter inner error extraction
 ├── scoring.js    # auto scoring for coding capability
 ├── config.js     # app config load/save (~/.config/opencode-model-picker/) + settings (language/timeout/numbering)
-├── opencode.js   # safe merge into opencode.jsonc (numbering-aware)
-└── utils.js      # cross-platform paths, JSONC parser
+├── opencode.js   # safe merge into OpenCode config (numbering-aware) + .bak backup + atomic write
+└── utils.js      # OpenCode-compatible paths, JSONC parser (comments + trailing commas), atomic write
 ```
 
 ## Notes
 
 - App config (saved providers + settings) is stored at `~/.config/opencode-model-picker/config.json` (API keys are plain text — keep this file secure).
+- OpenCode config path follows OpenCode itself: `~/.config/opencode` on all platforms (Windows included, via XDG), or `$OPENCODE_CONFIG_DIR` when set. The tool reads JSONC with comments and trailing commas.
+- A `.bak` backup is created next to the OpenCode config before every save, since the file is rewritten as plain JSON (comments/formatting are not preserved).
 - Test spinner is forced to one line per model (newlines collapsed, truncated to 80 chars) to avoid spamming the terminal on verbose provider errors (e.g. `openrouter/google/lyria-3-pro-preview`).
 - If no model works or fetch fails, the app returns to the main menu instead of exiting.
 - After writing to OpenCode, **restart opencode** and select the model via `/models`.
