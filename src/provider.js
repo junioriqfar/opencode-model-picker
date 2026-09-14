@@ -9,7 +9,7 @@ function oneLine(str, max = 120) {
 const TEST_MESSAGE = 'Say hi'
 const TEST_MAX_TOKENS = 16
 const TEST_TIMEOUT = 15000
-const PICKER_USER_AGENT = 'opencode-model-picker/1.2.1'
+const PICKER_USER_AGENT = 'opencode-model-picker/1.2.2'
 const PICKER_CLIENT_NAME = 'opencode-model-picker'
 
 // Stable session id per process. OpenCode Go (since 2026-09-06) requires a
@@ -163,20 +163,23 @@ function networkResult(err, lang) {
   }
 }
 
-async function attemptChat({ baseURL, apiKey, model, timeoutMs, lang }) {
+async function attemptChat({ baseURL, apiKey, model, timeoutMs, lang, tokenParam = 'max_tokens' }) {
   const url = `${normalizeModelURL(baseURL)}/chat/completions`
+  const body = {
+    model,
+    messages: [{ role: 'user', content: TEST_MESSAGE }],
+    stream: false,
+  }
+  // Reasoning model (mis. gpt-5/o-series) menolak `max_tokens` dan minta
+  // `max_completion_tokens`. Nilainya diisi oleh pemanggil via tokenParam.
+  body[tokenParam] = TEST_MAX_TOKENS
   try {
     const res = await fetchWithTimeout(
       url,
       {
         method: 'POST',
         headers: buildApiHeaders(apiKey, baseURL),
-        body: JSON.stringify({
-          model,
-          messages: [{ role: 'user', content: TEST_MESSAGE }],
-          max_tokens: TEST_MAX_TOKENS,
-          stream: false,
-        }),
+        body: JSON.stringify(body),
       },
       timeoutMs,
     )
@@ -337,10 +340,13 @@ function guessGoApi(modelId) {
   return 'chat'
 }
 
-export function getGoNpmForApi(api) {
-  if (api === 'messages') return '@ai-sdk/anthropic'
-  if (api === 'responses') return '@ai-sdk/openai'
-  return '@ai-sdk/openai-compatible'
+// Tebak endpoint untuk provider non-Go dari bentuk baseURL.
+// Anthropic-compatible (mis. https://api.minimax.io/anthropic) memakai /messages.
+function guessProviderApi(baseURL) {
+  const u = String(baseURL ?? '').toLowerCase()
+  if (u.includes('/anthropic') || u.endsWith('/messages')) return 'messages'
+  if (u.includes('/responses')) return 'responses'
+  return 'chat'
 }
 
 function shouldTryOtherGoEndpoints(result) {
@@ -348,6 +354,45 @@ function shouldTryOtherGoEndpoints(result) {
   // coba endpoint lain tidak akan membantu (atau sudah di-retry).
   if (!result || result.ok) return false
   return !['timeout', 'network', 'ratelimit', 'auth', 'payment', 'session', 'html'].includes(result.error)
+}
+
+// Cukup coba endpoint lain untuk non-Go kalau errornya memang menandakan
+// endpoint/route salah (bukan model hilang atau error auth).
+function isEndpointMismatch(result) {
+  if (!result || result.ok) return false
+  if (!['badrequest', 'notfound'].includes(result.error)) return false
+  // Hanya periksa pesan mentah dari provider (bukan pesan terjemahan),
+  // supaya "Model not found" hasil klasifikasi tidak disalahartikan.
+  const msg = String(result.detail ?? '').toLowerCase()
+  if (msg.includes('model not found') || msg.includes('model does not exist')) return false
+  return (
+    msg.includes('not supported') ||
+    msg.includes('unsupported') ||
+    msg.includes('endpoint') ||
+    msg.includes('route') ||
+    msg.includes('404 page') ||
+    msg.includes('no such') ||
+    msg.includes('method not allowed') ||
+    msg.includes('invalid url') ||
+    msg.includes('unknown path')
+  )
+}
+
+// Reasoning model menolak `max_tokens`; deteksi agar bisa retry dengan
+// `max_completion_tokens`.
+function isTokenParamError(result) {
+  if (!result || result.ok || result.error !== 'badrequest') return false
+  const msg = `${result.message ?? ''} ${result.detail ?? ''}`.toLowerCase()
+  const mentionsToken =
+    msg.includes('max_tokens') || msg.includes('max_completion_tokens') || msg.includes('max_output_tokens')
+  const looksUnsupported =
+    msg.includes('unsupported') ||
+    msg.includes('not supported') ||
+    msg.includes('unknown') ||
+    msg.includes('invalid') ||
+    msg.includes('unrecognized') ||
+    msg.includes('unexpected')
+  return mentionsToken && looksUnsupported
 }
 
 export async function testModel({
@@ -358,61 +403,55 @@ export async function testModel({
   retryOn429 = true,
   lang = 'en',
 }) {
-  const attemptByApi = {
-    chat: () => attemptChat({ baseURL, apiKey, model, timeoutMs, lang }),
+  const call = {
+    chat: (opts = {}) => attemptChat({ baseURL, apiKey, model, timeoutMs, lang, ...opts }),
     messages: () => attemptMessages({ baseURL, apiKey, model, timeoutMs, lang }),
     responses: () => attemptResponses({ baseURL, apiKey, model, timeoutMs, lang }),
   }
 
-  // Provider biasa (bukan Go): cukup /chat/completions seperti sebelumnya.
-  if (!isOpencodeZen(baseURL)) {
-    let result = await attemptByApi.chat()
+  const run = async (api) => {
+    let result = await call[api]()
+    // Parameter token salah -> coba `max_completion_tokens` (khusus chat).
+    if (api === 'chat' && isTokenParamError(result)) {
+      const retry = await call.chat({ tokenParam: 'max_completion_tokens' })
+      if (retry.ok) return retry
+      result = retry
+    }
     if (!result.ok && result.error === 'ratelimit' && retryOn429) {
       await sleep(1500)
-      result = await attemptByApi.chat()
+      result = await call[api]()
     }
     return result
   }
 
-  // OpenCode Go/Zen: coba endpoint tebakan dulu, fallback ke 2 lainnya.
-  const first = guessGoApi(model)
-  const order = [first, ...['chat', 'messages', 'responses'].filter((a) => a !== first)]
-
-  let firstResult = null
-  for (const api of order) {
-    let result = await attemptByApi[api]()
-    if (result.ok) return result
-    if (api === first) firstResult = result
-    // Missing session header: semua endpoint akan gagal sama -> langsung kembalikan.
-    if (result.error === 'session') return result
-    if (!shouldTryOtherGoEndpoints(result)) {
-      if (result.error === 'ratelimit' && retryOn429) {
-        await sleep(1500)
-        const retry = await attemptByApi[api]()
-        if (retry.ok) return retry
-        result = retry
-        if (api === first) firstResult = result
-      }
-      // Untuk error non-fallback (timeout/network/auth/dll) kembalikan hasil endpoint utama
-      // kecuali endpoint utama sudah dicoba dan ini endpoint lain yang juga gagal -> lanjut?
-      // Sederhananya: jika endpoint tebakan gagal dengan error non-fallback, jangan tebak lain.
-      if (api === first) return result
-      continue
+  if (isOpencodeZen(baseURL)) {
+    // OpenCode Go/Zen: coba endpoint tebakan dulu, fallback ke 2 lainnya.
+    const first = guessGoApi(model)
+    const order = [first, ...['chat', 'messages', 'responses'].filter((a) => a !== first)]
+    let firstResult = null
+    for (const api of order) {
+      const result = await run(api)
+      if (result.ok) return result
+      if (api === first) firstResult = result
+      // Missing session header: semua endpoint akan gagal sama -> langsung kembalikan.
+      if (result.error === 'session') return result
+      // Error non-fallback (timeout/network/auth/dll) pada endpoint tebakan: jangan tebak lain.
+      if (!shouldTryOtherGoEndpoints(result) && api === first) return result
     }
-    // Simpan hasil pertama untuk fallback pesan jika semua gagal
-    if (!firstResult) firstResult = result
+    // Semua endpoint gagal: kembalikan hasil endpoint tebakan (pesan paling relevan).
+    return firstResult ?? (await run(first))
   }
 
-  // Semua endpoint gagal. Kembalikan hasil endpoint tebakan (paling relevan),
-  // supaya pesan error sesuai dengan modelnya (mis. minimax -> hasil /messages).
-  // Jika karena alasan tertentu firstResult hilang, coba ulang endpoint pertama sekali lagi untuk pesan.
-  if (firstResult) return firstResult
-  let result = await attemptByApi[first]()
-  if (!result.ok && result.error === 'ratelimit' && retryOn429) {
-    await sleep(1500)
-    result = await attemptByApi[first]()
-  }
-  return result
+  // Provider biasa: mulai dari endpoint sesuai hint baseURL (/anthropic -> messages).
+  const first = guessProviderApi(baseURL)
+  const result = await run(first)
+  if (result.ok) return result
+  if (!isEndpointMismatch(result)) return result
+
+  // Endpoint/route salah -> coba satu alternatif yang paling mungkin.
+  const alt = first === 'chat' ? 'messages' : 'chat'
+  const altResult = await run(alt)
+  return altResult.ok ? altResult : result
 }
 
 function classifyError(model, status, json, text, lang = 'en') {

@@ -61,7 +61,7 @@ All settings are saved immediately and applied to the current session.
 1. **Initial action** — choose between *Use saved provider*, *Manage saved providers* (edit name/base URL/API key, delete — bottom option is **Kembali** / **Back** in green), *Add new provider*, *Settings*, or *Exit*.
 2. **Fetch models** — the app calls `GET {baseURL}/v1/models`. On failure, error is shown and you return to the main menu (app does not close).
 3. **Select models** — after fetching, choose **Select all (X models)** to test every model, or **Custom** to pick specific models via multiselect (space to select, enter to continue). If no model is selected in Custom mode, you return to the main menu.
-4. **Test access** — each model is tested with a small request using the timeout from **Settings → Default timeout** (initially **15 seconds**, configurable 1–300 seconds, stored in settings). The spinner stays on a single line per model (`model-id ✓/✗ — short message`), sanitized to one line and truncated (handles OpenRouter `Provider returned error` wrapping by extracting inner message). Rate-limited requests are retried once automatically. A 500ms delay between models reduces burst rate-limiting.
+4. **Test access** — each model is tested with a small request using the timeout from **Settings → Default timeout** (initially **15 seconds**, configurable 1–300 seconds, stored in settings). The right endpoint is chosen automatically: `/chat/completions` by default, `/messages` for Anthropic-compatible base URLs (`.../anthropic`) or OpenCode Go MiniMax/Qwen, and `/responses` for Go Grok/GPT-Luna/Muse Spark. If a chat request is rejected for using `max_tokens`, it retries once with `max_completion_tokens` (reasoning models). The spinner stays on a single line per model (`model-id ✓/✗ — short message`), sanitized to one line and truncated (handles OpenRouter `Provider returned error` wrapping by extracting inner message). Rate-limited requests are retried once automatically. A 500ms delay between models reduces burst rate-limiting.
 5. **Recap** — shows `✓ X working  ✗ Y dead/EOL/not found  ! Z temporary (timeout/rate-limit)` and lists each dead/warn model on its own single line. If **0 working**, it shows `No working models...` and returns to the main menu instead of closing.
 6. **Auto scoring** — working models are ranked by coding capability score (reasoning, tools, context, name heuristics). Ranking is shown as a single non-interactive block with numbers, no enter required:
    ```
@@ -96,7 +96,7 @@ Settings are stored in `~/.config/opencode-model-picker/config.json` alongside s
 src/
 ├── cli.js        # interactive flow (@clack/prompts) + i18n + settings + outer loop (no auto-close) + single-line spinner
 ├── i18n.js       # translations (en/id) + numbering styles
-├── provider.js   # GET /v1/models + test /v1/chat/completions + single-line sanitization + OpenRouter inner error extraction
+├── provider.js   # GET /v1/models + endpoint selection (chat/messages/responses) + Go x-opencode-session + single-line sanitization + OpenRouter inner error extraction
 ├── scoring.js    # auto scoring for coding capability
 ├── config.js     # app config load/save (~/.config/opencode-model-picker/) + settings (language/timeout/numbering)
 ├── opencode.js   # safe merge into OpenCode config (numbering-aware) + .bak backup + atomic write
@@ -108,6 +108,7 @@ src/
 - App config (saved providers + settings) is stored at `~/.config/opencode-model-picker/config.json` (API keys are plain text — keep this file secure).
 - OpenCode config path follows OpenCode itself: `~/.config/opencode` on all platforms (Windows included, via XDG), or `$OPENCODE_CONFIG_DIR` when set. The tool reads JSONC with comments and trailing commas.
 - A `.bak` backup is created next to the OpenCode config before every save, since the file is rewritten as plain JSON (comments/formatting are not preserved).
+- For providers mixing protocols, the provider-level `npm` is set to the **majority** endpoint's package (`@ai-sdk/openai-compatible` / `@ai-sdk/anthropic` / `@ai-sdk/openai`) and the minority models get a per-model `provider.npm` override, so as little as possible depends on per-model overrides.
 - Test spinner is forced to one line per model (newlines collapsed, truncated to 80 chars) to avoid spamming the terminal on verbose provider errors (e.g. `openrouter/google/lyria-3-pro-preview`).
 - If no model works or fetch fails, the app returns to the main menu instead of exiting.
 - After writing to OpenCode, **restart opencode** and select the model via `/models`.

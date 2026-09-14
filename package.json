@@ -1,6 +1,6 @@
 {
   "name": "opencode-model-picker",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Fetch, test, rank, and save OpenAI-compatible models to OpenCode config",
   "type": "module",
   "bin": {

@@ -24,6 +24,13 @@ function readFileSafe(path) {
   }
 }
 
+// Peta endpoint -> paket AI SDK yang dipakai opencode.
+export function npmForApi(api) {
+  if (api === 'messages') return '@ai-sdk/anthropic'
+  if (api === 'responses') return '@ai-sdk/openai'
+  return '@ai-sdk/openai-compatible'
+}
+
 /**
  * Bangun struktur blok model sesuai skema opencode.
  * @param {Array} orderedModels - array {id, shortName, vision, api?}
@@ -53,9 +60,9 @@ export function buildModelsBlock(
         output: ['text'],
       },
     }
-    // Override per-model agar runtime opencode memakai SDK yang benar.
-    // Format: { provider: { npm: "..." } } sesuai diskusi anomalyco/opencode#31919.
-    const needNpm = m.api === 'messages' ? '@ai-sdk/anthropic' : m.api === 'responses' ? '@ai-sdk/openai' : null
+    // Override per-model hanya untuk minoritas, agar sesedikit mungkin bergantung
+    // pada provider.npm per-model (lihat anomalyco/opencode#31919/#33888).
+    const needNpm = m.api ? npmForApi(m.api) : null
     if (needNpm && needNpm !== defaultNpm) {
       entry.provider = { npm: needNpm }
     }
@@ -65,19 +72,26 @@ export function buildModelsBlock(
 }
 
 /**
- * Tentukan npm provider-level yang paling cocok dari daftar model.
- * Jika semua model memakai api yang sama, pakai npm-nya langsung
- * sehingga tidak perlu override per-model.
+ * Tentukan npm provider-level dari api yang paling banyak dipakai.
+ * Mayoritas dipasang di level provider, minoritas diberi override per-model,
+ * sehingga sesedikit mungkin bergantung pada override per-model.
  */
 export function pickProviderNpm(orderedModels, fallback = '@ai-sdk/openai-compatible') {
-  const apis = new Set((orderedModels ?? []).map((m) => m.api).filter(Boolean))
-  if (apis.size === 1) {
-    const only = [...apis][0]
-    if (only === 'messages') return '@ai-sdk/anthropic'
-    if (only === 'responses') return '@ai-sdk/openai'
-    return '@ai-sdk/openai-compatible'
+  const counts = new Map()
+  for (const m of orderedModels ?? []) {
+    const api = m.api || 'chat'
+    counts.set(api, (counts.get(api) ?? 0) + 1)
   }
-  return fallback
+  if (counts.size === 0) return fallback
+  let topApi = 'chat'
+  let topCount = -1
+  for (const [api, count] of counts) {
+    if (count > topCount) {
+      topCount = count
+      topApi = api
+    }
+  }
+  return npmForApi(topApi)
 }
 
 export function providerExists(providerKey, lang = 'en') {

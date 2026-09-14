@@ -61,7 +61,7 @@ Semua pengaturan langsung disimpan dan dipakai untuk sesi saat itu.
 1. **Aksi awal** — pilih antara *Gunakan provider tersimpan*, *Kelola provider tersimpan* (ubah nama/base URL/API key, hapus — opsi paling bawah adalah **Kembali** hijau), *Tambah provider baru*, *Pengaturan*, atau *Keluar*.
 2. **Ambil model** — aplikasi memanggil `GET {baseURL}/v1/models`. Jika gagal, error ditampilkan dan kembali ke menu utama (tidak menutup aplikasi).
 3. **Pilih model** — setelah daftar ditemukan, pilih **Pilih semua (X model)** untuk tes semua model, atau **Custom** untuk memilih model tertentu via multiselect (spasi untuk pilih, enter untuk lanjut). Jika Custom tanpa pilihan, kembali ke menu utama.
-4. **Tes akses** — setiap model diuji dengan request kecil menggunakan timeout dari **Pengaturan → Timeout default** (awal **15 detik**, bisa diubah 1–300 detik, tersimpan di settings). Spinner tetap satu baris per model (`model-id ✓/✗ — pesan singkat`), disanitasi ke satu baris dan dipotong (menangani bungkusan OpenRouter `Provider returned error` dengan mengekstrak pesan inner). Rate-limit dicoba ulang sekali otomatis. Terdapat jeda 500ms antar model untuk mengurangi burst rate-limit.
+4. **Tes akses** — setiap model diuji dengan request kecil menggunakan timeout dari **Pengaturan → Timeout default** (awal **15 detik**, bisa diubah 1–300 detik, tersimpan di settings). Endpoint dipilih otomatis: `/chat/completions` (default), `/messages` untuk base URL Anthropic-compatible (`.../anthropic`) atau OpenCode Go MiniMax/Qwen, dan `/responses` untuk Go Grok/GPT-Luna/Muse Spark. Jika request chat ditolak karena memakai `max_tokens`, otomatis dicoba ulang sekali dengan `max_completion_tokens` (model reasoning). Spinner tetap satu baris per model (`model-id ✓/✗ — pesan singkat`), disanitasi ke satu baris dan dipotong (menangani bungkusan OpenRouter `Provider returned error` dengan mengekstrak pesan inner). Rate-limit dicoba ulang sekali otomatis. Terdapat jeda 500ms antar model untuk mengurangi burst rate-limit.
 5. **Rekap** — menampilkan `✓ X berfungsi  ✗ Y mati/EOL/tidak ada  ! Z gagal sementara` dan daftar tiap model mati/warn di baris tunggal. Jika **0 berfungsi**, tampilkan `Tidak ada model yang berfungsi...` dan kembali ke menu utama, bukan keluar.
 6. **Skor otomatis** — model yang berfungsi diurutkan berdasarkan skor kemampuan coding (reasoning, tools, konteks, heuristik nama). Ranking ditampilkan sebagai satu blok non-interaktif bernomor, tanpa perlu enter:
    ```
@@ -96,7 +96,7 @@ Pengaturan disimpan di `~/.config/opencode-model-picker/config.json` bersama pro
 src/
 ├── cli.js        # alur interaktif (@clack/prompts) + i18n + pengaturan + outer loop (tidak auto-close) + spinner satu baris
 ├── i18n.js       # terjemahan (en/id) + gaya penomoran
-├── provider.js   # GET /v1/models + test /v1/chat/completions + sanitasi satu baris + ekstrak inner error OpenRouter
+├── provider.js   # GET /v1/models + pemilihan endpoint (chat/messages/responses) + x-opencode-session Go + sanitasi satu baris + ekstrak inner error OpenRouter
 ├── scoring.js    # skor otomatis kemampuan coding
 ├── config.js     # simpan/muat config aplikasi (~/.config/opencode-model-picker/) + settings (language/timeout/numbering)
 ├── opencode.js   # merge aman ke config OpenCode (mendukung penomoran) + backup .bak + atomic write
@@ -108,6 +108,7 @@ src/
 - Config aplikasi (provider tersimpan + pengaturan) disimpan di `~/.config/opencode-model-picker/config.json` (API key plain text — jaga file ini).
 - Path config OpenCode mengikuti OpenCode sendiri: `~/.config/opencode` di semua platform (termasuk Windows, via XDG), atau `$OPENCODE_CONFIG_DIR` bila diatur. Tool membaca JSONC dengan komentar dan trailing comma.
 - Backup `.bak` dibuat di sebelah config OpenCode setiap kali menyimpan, karena file ditulis ulang sebagai JSON biasa (komentar/format tidak dipertahankan).
+- Untuk provider campuran protokol, `npm` level provider diisi paket endpoint **mayoritas** (`@ai-sdk/openai-compatible` / `@ai-sdk/anthropic` / `@ai-sdk/openai`) dan model minoritas diberi override `provider.npm` per-model, sehingga sesedikit mungkin bergantung pada override per-model.
 - Spinner tes dipaksa satu baris per model (newline diringkas, dipotong 80 char) agar tidak spam terminal pada error verbose (mis. `openrouter/google/lyria-3-pro-preview`).
 - Jika tidak ada model yang berfungsi atau fetch gagal, aplikasi kembali ke menu utama, bukan keluar.
 - Setelah menulis ke opencode, **restart opencode** lalu pilih model via `/models`.
