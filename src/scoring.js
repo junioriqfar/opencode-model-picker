@@ -103,6 +103,10 @@ export function sortByScore(models) {
   })
 }
 
+export function sortByName(models) {
+  return [...models].sort((a, b) => a.id.localeCompare(b.id))
+}
+
 export function attachScores(models) {
   return models.map((m) => {
     const { score, reasons } = scoreModel(m)

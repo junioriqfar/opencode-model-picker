@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { listModels, testModel, isOpencodeZen } from '../src/provider.js'
+import { listModels, testModel, isOpencodeZen, guessApi } from '../src/provider.js'
 
 const GO = 'https://opencode.ai/zen/go/v1'
 const OPENAI = 'https://api.openai.com/v1'
@@ -25,6 +25,19 @@ async function withFetch(impl, fn) {
     globalThis.fetch = prev
   }
 }
+
+test('guessApi infers endpoint without any request', () => {
+  // OpenCode Go -> heuristik nama model
+  assert.equal(guessApi(GO, 'minimax-m3'), 'messages')
+  assert.equal(guessApi(GO, 'qwen3.8-max'), 'messages')
+  assert.equal(guessApi(GO, 'muse-spark-1.3-contributor'), 'responses')
+  assert.equal(guessApi(GO, 'grok-4.6'), 'responses')
+  assert.equal(guessApi(GO, 'gpt-5.6-luna'), 'responses')
+  assert.equal(guessApi(GO, 'kimi-k3'), 'chat')
+  // Non-Go -> dari bentuk base URL
+  assert.equal(guessApi(ANTHROPIC, 'MiniMax-M3'), 'messages')
+  assert.equal(guessApi('https://api.example.com/v1', 'gpt-4o'), 'chat')
+})
 
 test('isOpencodeZen detects Go/Zen hosts', () => {
   assert.equal(isOpencodeZen(GO), true)

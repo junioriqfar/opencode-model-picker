@@ -1,6 +1,6 @@
 {
   "name": "opencode-model-picker",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Fetch, test, rank, and save OpenAI-compatible models to OpenCode config",
   "type": "module",
   "bin": {
@@ -14,7 +14,8 @@
     "build:macos": "pkg -t node24-macos-x64 . -o \"dist/opencode-model-picker-macos-x64\"",
     "build:macos:arm64": "pkg -t node24-macos-arm64 . -o \"dist/opencode-model-picker-macos-arm64\" --no-signature",
     "build:win": "pkg -t node24-win-x64 . -o \"dist/opencode-model-picker-win-x64.exe\"",
-    "build:linux": "pkg -t node24-linux-x64 . -o \"dist/opencode-model-picker-linux-x64\""
+    "build:linux": "pkg -t node24-linux-x64 . -o \"dist/opencode-model-picker-linux-x64\"",
+    "sync:models": "node scripts/sync-go-models.mjs"
   },
   "keywords": [
     "opencode",

@@ -9,7 +9,7 @@ function oneLine(str, max = 120) {
 const TEST_MESSAGE = 'Say hi'
 const TEST_MAX_TOKENS = 16
 const TEST_TIMEOUT = 15000
-const PICKER_USER_AGENT = 'opencode-model-picker/1.3.0'
+const PICKER_USER_AGENT = 'opencode-model-picker/1.4.0'
 const PICKER_CLIENT_NAME = 'opencode-model-picker'
 
 // Stable session id per process. OpenCode Go (since 2026-09-06) requires a
@@ -373,6 +373,11 @@ function guessProviderApi(baseURL) {
   if (u.includes('/anthropic') || u.endsWith('/messages')) return 'messages'
   if (u.includes('/responses')) return 'responses'
   return 'chat'
+}
+
+// Tebak endpoint/model tanpa melakukan request (dipakai saat tes per-model dilewati).
+export function guessApi(baseURL, modelId) {
+  return isOpencodeZen(baseURL) ? guessGoApi(modelId) : guessProviderApi(baseURL)
 }
 
 function shouldTryOtherGoEndpoints(result) {

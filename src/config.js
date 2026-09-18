@@ -5,6 +5,7 @@ export const DEFAULT_SETTINGS = {
   language: 'en',
   timeout: 15,
   numbering: '01.',
+  sort: 'score',
 }
 
 export const DEFAULT_CONFIG = {
@@ -26,6 +27,9 @@ export function loadAppConfig() {
     }
     if (!['01.', '1.', '001.', '01 -', 'none'].includes(merged.settings.numbering)) {
       merged.settings.numbering = DEFAULT_SETTINGS.numbering
+    }
+    if (!['score', 'name'].includes(merged.settings.sort)) {
+      merged.settings.sort = DEFAULT_SETTINGS.sort
     }
     // ensure providers is array
     if (!Array.isArray(merged.providers)) merged.providers = []

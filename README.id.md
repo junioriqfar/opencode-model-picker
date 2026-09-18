@@ -61,6 +61,7 @@ Saat tidak ada file konfigurasi (`~/.config/opencode-model-picker/config.json` b
 1. **Bahasa** — `English` / `Indonesia`
 2. **Timeout default** — 1–300 detik
 3. **Gaya penomoran** — `01.` / `1.` / `001.` / `01 -` / `none`
+4. **Urutan** — `Skor bawaan (coding)` / `Abjad (A-Z)`
 
 Semua pengaturan langsung disimpan dan dipakai untuk sesi saat itu.
 
@@ -69,9 +70,9 @@ Semua pengaturan langsung disimpan dan dipakai untuk sesi saat itu.
 1. **Aksi awal** — pilih antara *Gunakan provider tersimpan*, *Kelola provider tersimpan* (ubah nama/base URL/API key, hapus — opsi paling bawah adalah **Kembali** hijau), *Tambah provider baru*, *Pengaturan*, atau *Keluar*.
 2. **Ambil model** — aplikasi memanggil `GET {baseURL}/v1/models`. Jika gagal, error ditampilkan dan kembali ke menu utama (tidak menutup aplikasi).
 3. **Pilih model** — setelah daftar ditemukan, pilih **Pilih semua (X model)** untuk tes semua model, atau **Custom** untuk memilih model tertentu via multiselect (spasi untuk pilih, enter untuk lanjut). Jika Custom tanpa pilihan, kembali ke menu utama.
-4. **Tes akses** — setiap model diuji dengan request kecil menggunakan timeout dari **Pengaturan → Timeout default** (awal **15 detik**, bisa diubah 1–300 detik, tersimpan di settings). Endpoint dipilih otomatis: `/chat/completions` (default), `/messages` untuk base URL Anthropic-compatible (`.../anthropic`) atau OpenCode Go MiniMax/Qwen, dan `/responses` untuk Go Grok/GPT-Luna/Muse Spark. Jika request chat ditolak karena memakai `max_tokens`, otomatis dicoba ulang sekali dengan `max_completion_tokens` (model reasoning). Spinner tetap satu baris per model (`model-id ✓/✗ — pesan singkat`), disanitasi ke satu baris dan dipotong (menangani bungkusan OpenRouter `Provider returned error` dengan mengekstrak pesan inner). Rate-limit dicoba ulang sekali otomatis. Terdapat jeda 500ms antar model untuk mengurangi burst rate-limit.
+4. **Tes akses (opsional)** — setelah memilih model, aplikasi bertanya **Coba akses tiap model?** (`Ya` default / `Tidak`). Pilih **Tidak** untuk melewati semua request per model dan langsung menyimpan seluruh model terpilih (tanpa filter mati/EOL; endpoint/npm ditebak dari nama model atau base URL). Pilih **Ya** untuk menguji tiap model dengan request kecil menggunakan timeout dari **Pengaturan → Timeout default** (awal **15 detik**, bisa diubah 1–300 detik, tersimpan di settings). Endpoint dipilih otomatis: `/chat/completions` (default), `/messages` untuk base URL Anthropic-compatible (`.../anthropic`) atau OpenCode Go MiniMax/Qwen, dan `/responses` untuk Go Grok/GPT-Luna/Muse Spark. Jika request chat ditolak karena memakai `max_tokens`, otomatis dicoba ulang sekali dengan `max_completion_tokens` (model reasoning). Spinner tetap satu baris per model (`model-id ✓/✗ — pesan singkat`), disanitasi ke satu baris dan dipotong (menangani bungkusan OpenRouter `Provider returned error` dengan mengekstrak pesan inner). Rate-limit dicoba ulang sekali otomatis. Terdapat jeda 500ms antar model untuk mengurangi burst rate-limit.
 5. **Rekap** — menampilkan `✓ X berfungsi  ✗ Y mati/EOL/tidak ada  ! Z gagal sementara` dan daftar tiap model mati/warn di baris tunggal. Jika **0 berfungsi**, tampilkan `Tidak ada model yang berfungsi...` dan kembali ke menu utama, bukan keluar.
-6. **Skor otomatis** — model yang berfungsi diurutkan berdasarkan skor kemampuan coding (reasoning, tools, konteks, heuristik nama). Ranking ditampilkan sebagai satu blok non-interaktif bernomor, tanpa perlu enter:
+6. **Pengurutan** — model yang berfungsi diurutkan sesuai **Pengaturan → Urutan**: berdasarkan skor kemampuan coding (reasoning, tools, konteks, heuristik nama) atau abjad (A–Z). Daftar ditampilkan sebagai satu blok non-interaktif bernomor, tanpa perlu enter:
    ```
    Ranking awal (skor otomatis):
      1. nvidia/minimaxai/minimax-m3 (skor 85)
@@ -95,8 +96,20 @@ Tersedia di menu utama → **Pengaturan** (tombol **Kembali** sengaja hijau):
   - `001.` → `001. model`, `002. model` (3 digit)
   - `01 -` → `01 - model`, `02 - model`
   - `none` → `model` (tanpa prefix)
+- **Urutan** — cara mengurutkan model yang berfungsi sebelum disimpan: `Skor bawaan (coding)` (default) atau `Abjad (A-Z)`. Edit manual tetap tersedia setelah pengurutan.
 
 Pengaturan disimpan di `~/.config/opencode-model-picker/config.json` bersama provider tersimpan dan mendukung migrasi dari config lama.
+
+## Varian (OpenCode Go)
+
+Untuk base URL **OpenCode Go**, tool menulis `reasoning: true` plus `limit` (context/output) tiap model. OpenCode lalu membuat **variants** otomatis (mis. `low`, `medium`, `high` untuk `@ai-sdk/openai-compatible` / `@ai-sdk/openai`, atau `high`, `max` untuk `@ai-sdk/anthropic`).
+
+Di OpenCode:
+- Tekan **`ctrl+t`** (`variant_cycle`) untuk ganti varian cepat.
+- Atau jalankan command **`/variants`** untuk membuka dialog *Select variant* dan memilih (termasuk `Default`).
+- Pilihan disimpan per provider/model.
+
+Limit/capability diambil dari snapshot [models.dev](https://models.dev) (`opencode-go`). Regenerasi dengan `npm run sync:models`. Model baru yang belum ada memakai fallback `context: 131072`, `output: 8192`, `reasoning: true`.
 
 ## Struktur
 
@@ -105,15 +118,19 @@ src/
 ├── cli.js        # alur interaktif (@clack/prompts) + i18n + pengaturan + outer loop (tidak auto-close) + spinner satu baris
 ├── i18n.js       # terjemahan (en/id) + gaya penomoran
 ├── provider.js   # GET /v1/models + pemilihan endpoint (chat/messages/responses) + x-opencode-session Go + normalisasi capability + ekstrak inner error OpenRouter
+├── go-models.js  # snapshot metadata OpenCode Go (models.dev) untuk varian otomatis
 ├── scoring.js    # skor otomatis kemampuan coding
-├── config.js     # simpan/muat config aplikasi (~/.config/opencode-model-picker/) + settings (language/timeout/numbering)
-├── opencode.js   # merge aman ke config OpenCode (mendukung penomoran) + backup .bak + atomic write
+├── config.js     # simpan/muat config aplikasi (~/.config/opencode-model-picker/) + settings (language/timeout/numbering/sort)
+├── opencode.js   # merge aman ke config OpenCode (mendukung penomoran) + varian Go + backup .bak + atomic write
 └── utils.js      # path sesuai OpenCode, parser JSONC (komentar + trailing comma), atomic write
+
+scripts/
+└── sync-go-models.mjs  # regenerasi go-models.js dari models.dev
 
 test/
 ├── utils.test.js     # parser JSONC + resolusi path config
 ├── provider.test.js  # pemilihan endpoint, header session, klasifikasi error
-└── opencode.test.js  # blok model/npm + backup/atomic write
+└── opencode.test.js  # blok model/npm + varian Go + backup/atomic write
 ```
 
 ## Catatan
@@ -123,6 +140,9 @@ test/
 - Backup `.bak` dibuat di sebelah config OpenCode setiap kali menyimpan, karena file ditulis ulang sebagai JSON biasa (komentar/format tidak dipertahankan).
 - Untuk provider campuran protokol, `npm` level provider diisi paket endpoint **mayoritas** (`@ai-sdk/openai-compatible` / `@ai-sdk/anthropic` / `@ai-sdk/openai`) dan model minoritas diberi override `provider.npm` per-model, sehingga sesedikit mungkin bergantung pada override per-model.
 - Bila provider tidak mengirim `capabilities`, capability disimpulkan dari `architecture`/`supported_parameters` (gaya OpenRouter/gateway), sehingga skor otomatis tetap punya data.
+- `GET /v1/models` OpenCode Go hanya mengembalikan id, jadi metadata reasoning/limit untuk varian dibundel dari models.dev (lihat `src/go-models.js`).
+- Melewati tes akses akan menulis semua model terpilih tanpa verifikasi — berguna bila `/v1/models` provider sudah akurat (mis. OpenCode Go). Endpoint/`npm` saat itu ditebak (`guessApi`), bukan diuji.
+- Navigasi: **ESC** kembali ke pilihan sebelumnya, **Ctrl+C** keluar dari aplikasi. Di menu utama, ESC juga keluar. Pengaturan yang sudah dikonfirmasi tetap tersimpan saat kembali.
 - Spinner tes dipaksa satu baris per model (newline diringkas, dipotong 80 char) agar tidak spam terminal pada error verbose (mis. `openrouter/google/lyria-3-pro-preview`).
 - Jika tidak ada model yang berfungsi atau fetch gagal, aplikasi kembali ke menu utama, bukan keluar.
 - Setelah menulis ke opencode, **restart opencode** lalu pilih model via `/models`.

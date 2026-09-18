@@ -44,6 +44,8 @@ export const translations = {
     selectAll: 'Select all ({count} models)',
     selectCustom: 'Custom selection',
     selectModels: 'Select models to test (space to select, enter to continue):',
+    testModelsConfirm: 'Test each model access? (No = skip and save all selected models)',
+    testSkipped: 'Access test skipped — using all {count} selected models.',
     timeoutValidation: 'Enter an integer between 1-300',
     checkingModels: 'Testing model access (this may take a while)...',
     checkDone: 'Check complete.',
@@ -58,10 +60,6 @@ export const translations = {
     editOrderConfirm: 'Edit order manually?',
     configSettingsTitle: 'Configuration settings:',
 
-    // paid
-    markPaidConfirm: 'Mark paid models with (PAID) label?',
-    selectPaid: 'Select PAID models (space to select):',
-
     // provider key / short name
     providerKeyPrompt: 'Provider key in opencode (e.g. 9Router, DeepSeek):',
     required: 'Required',
@@ -70,6 +68,7 @@ export const translations = {
 
     // preview & save
     targetConfig: 'Target config: {path}',
+    variantsHint: 'OpenCode Go: variants (e.g. low/medium/high) are generated automatically. In OpenCode use ctrl+t or the /variants command.',
     listToWrite: 'Names to be written:',
     previewBlock: 'Preview provider block to be written:',
     providerExistsWarn: 'Provider "{key}" already exists in opencode.jsonc. Saving will DELETE all existing models for that provider and replace them with the current list.',
@@ -116,7 +115,12 @@ export const translations = {
     settingsLanguage: 'Language',
     settingsTimeout: 'Default timeout',
     settingsNumbering: 'Numbering style',
+    settingsSort: 'Sort order',
     settingsBack: 'Back',
+    sortPrompt: 'Select default sort order:',
+    sortScore: 'Built-in score (coding)',
+    sortName: 'Alphabetical (A-Z)',
+    sortUpdated: 'Sort order set to "{sort}"',
     languagePrompt: 'Select language:',
     languageEn: 'English',
     languageId: 'Indonesia',
@@ -174,6 +178,8 @@ export const translations = {
     selectAll: 'Pilih semua ({count} model)',
     selectCustom: 'Pilih custom',
     selectModels: 'Pilih model yang akan dicek (spasi untuk pilih, enter untuk lanjut):',
+    testModelsConfirm: 'Coba akses tiap model? (Tidak = lewati dan simpan semua model terpilih)',
+    testSkipped: 'Tes akses dilewati — memakai semua {count} model terpilih.',
     timeoutValidation: 'Masukkan angka bulat antara 1-300',
     checkingModels: 'Mengecek akses model (mungkin butuh beberapa saat)...',
     checkDone: 'Pengecekan selesai.',
@@ -187,15 +193,13 @@ export const translations = {
     editOrderConfirm: 'Edit urutan secara manual?',
     configSettingsTitle: 'Pengaturan konfigurasi:',
 
-    markPaidConfirm: 'Tandai model berbayar dengan label (PAID)?',
-    selectPaid: 'Pilih model yang PAID (spasi untuk pilih):',
-
     providerKeyPrompt: 'Key provider di opencode (mis. 9Router, DeepSeek):',
     required: 'Wajib diisi',
     autoShortConfirm: 'Gunakan nama pendek otomatis (ambil bagian terakhir ID, mis. minimax-m3)?',
     shortNamePrompt: 'Nama pendek untuk "{id}" (kosongkan untuk memakai ID asli):',
 
     targetConfig: 'Target config: {path}',
+    variantsHint: 'OpenCode Go: varian (mis. low/medium/high) dibuat otomatis. Di OpenCode pakai ctrl+t atau command /variants.',
     listToWrite: 'Daftar nama yang akan ditulis:',
     previewBlock: 'Preview blok provider yang akan ditulis:',
     providerExistsWarn: 'Provider "{key}" sudah ada di opencode.jsonc. Menyimpan akan MENGHAPUS semua model yang ada di provider tersebut dan menggantinya dengan daftar saat ini.',
@@ -238,7 +242,12 @@ export const translations = {
     settingsLanguage: 'Bahasa',
     settingsTimeout: 'Timeout default',
     settingsNumbering: 'Gaya penomoran',
+    settingsSort: 'Urutan',
     settingsBack: 'Kembali',
+    sortPrompt: 'Pilih urutan default:',
+    sortScore: 'Skor bawaan (coding)',
+    sortName: 'Abjad (A-Z)',
+    sortUpdated: 'Urutan diubah menjadi "{sort}"',
     languagePrompt: 'Pilih bahasa:',
     languageEn: 'English',
     languageId: 'Indonesia',

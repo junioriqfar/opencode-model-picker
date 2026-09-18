@@ -1,6 +1,7 @@
 import { copyFileSync } from 'node:fs'
 import { opencodeConfigPath, parseJsonc, readFileSafe, writeFileAtomic } from './utils.js'
 import { t, formatNumber } from './i18n.js'
+import { getGoModelMeta } from './go-models.js'
 
 export function readOpencodeConfig(lang = 'en') {
   const path = opencodeConfigPath()
@@ -31,27 +32,41 @@ export function npmForApi(api) {
  *   dan muse-spark/grok/luna butuh @ai-sdk/openai (/responses).
  *   Lihat https://opencode.ai/docs/go/#endpoints
  * @param {Object} opts
- * @param {Array<string>} opts.paidIds - daftar model yang ditandai PAID
- * @param {boolean} opts.markPaid - label PAID
  * @param {string} opts.numbering - gaya penomoran: '01.', '1.', '001.', '01 -', 'none'
  * @param {string} opts.defaultNpm - npm default provider-level
+ * @param {boolean} opts.go - true untuk OpenCode Go: tulis capabilities + limit
+ *   agar OpenCode otomatis membuat model variants (mis. low/medium/high).
  */
 export function buildModelsBlock(
   orderedModels,
-  { paidIds = [], markPaid = false, numbering = '01.', defaultNpm = '@ai-sdk/openai-compatible' } = {},
+  { numbering = '01.', defaultNpm = '@ai-sdk/openai-compatible', go = false } = {},
 ) {
   const models = {}
   orderedModels.forEach((m, i) => {
     const prefix = formatNumber(i, numbering)
-    const isPaid = paidIds.includes(m.id)
-    const paidSuffix = markPaid && isPaid ? ' (PAID)' : ''
     const entry = {
-      name: `${prefix}${m.shortName}${paidSuffix}`,
+      name: `${prefix}${m.shortName}`,
       modalities: {
         input: m.vision ? ['text', 'image'] : ['text'],
         output: ['text'],
       },
     }
+
+    if (go) {
+      // Metadata OpenCode Go (dari models.dev). `reasoning` memicu variants,
+      // dan `limit.output` wajib agar varian Anthropic (@ai-sdk/anthropic)
+      // tidak menghasilkan budgetTokens negatif (lihat ProviderTransform.variants).
+      const meta = getGoModelMeta(m.id)
+      entry.reasoning = meta.reasoning !== false
+      entry.limit = {
+        context: m.contextLength ?? meta.context,
+        output: m.maxOutput ?? meta.output,
+      }
+      if (Array.isArray(meta.input) && meta.input.length > 0) {
+        entry.modalities = { input: meta.input, output: ['text'] }
+      }
+    }
+
     // Override per-model hanya untuk minoritas, agar sesedikit mungkin bergantung
     // pada provider.npm per-model (lihat anomalyco/opencode#31919/#33888).
     const needNpm = m.api ? npmForApi(m.api) : null
@@ -61,6 +76,29 @@ export function buildModelsBlock(
     models[m.id] = entry
   })
   return models
+}
+
+/**
+ * Bangun blok provider opencode.
+ * `name` sengaja selalu sama dengan `key` yang diketik user, agar label
+ * provider di OpenCode konsisten dengan key-nya.
+ * @param {Object} opts
+ * @param {string} opts.key - provider key di opencode
+ * @param {string} opts.npm - npm provider-level
+ * @param {string} opts.baseURL
+ * @param {string} opts.apiKey
+ * @param {Object} opts.models - hasil buildModelsBlock
+ */
+export function buildProviderBlock({ key, npm, baseURL, apiKey, models }) {
+  return {
+    npm,
+    name: key,
+    options: {
+      baseURL,
+      apiKey,
+    },
+    models,
+  }
 }
 
 /**

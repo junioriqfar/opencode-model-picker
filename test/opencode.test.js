@@ -5,11 +5,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   buildModelsBlock,
+  buildProviderBlock,
   pickProviderNpm,
   npmForApi,
   writeOpencodeConfig,
   readOpencodeConfig,
 } from '../src/opencode.js'
+import { GO_MODEL_FALLBACK, GO_MODEL_META, getGoModelMeta } from '../src/go-models.js'
 
 test('npmForApi maps endpoint to AI SDK package', () => {
   assert.equal(npmForApi('chat'), '@ai-sdk/openai-compatible')
@@ -32,16 +34,68 @@ test('buildModelsBlock applies numbering, modalities and minority npm override',
     { id: 'glm-5.3', shortName: 'glm-5.3', vision: false, api: 'chat' },
   ]
   const defaultNpm = pickProviderNpm(ordered) // chat mayoritas
-  const block = buildModelsBlock(ordered, { numbering: '01.', defaultNpm, markPaid: true, paidIds: ['kimi-k3'] })
+  const block = buildModelsBlock(ordered, { numbering: '01.', defaultNpm })
 
   assert.equal(block['minimax-m3'].name, '01. minimax-m3')
-  assert.equal(block['kimi-k3'].name, '02. kimi-k3 (PAID)')
+  assert.equal(block['kimi-k3'].name, '02. kimi-k3')
   assert.deepEqual(block['kimi-k3'].modalities.input, ['text', 'image'])
   assert.deepEqual(block['glm-5.3'].modalities.input, ['text'])
   // Minoritas (messages) dapat override, mayoritas (chat) tidak
   assert.equal(block['minimax-m3'].provider.npm, '@ai-sdk/anthropic')
   assert.equal(block['kimi-k3'].provider, undefined)
   assert.equal(block['glm-5.3'].provider, undefined)
+})
+
+test('buildProviderBlock uses the key as the provider name', () => {
+  const block = buildProviderBlock({
+    key: '9Router',
+    npm: '@ai-sdk/openai-compatible',
+    baseURL: 'https://example.com/v1',
+    apiKey: 'secret',
+    models: { m1: { name: 'm1' } },
+  })
+  assert.equal(block.name, '9Router')
+  assert.equal(block.npm, '@ai-sdk/openai-compatible')
+  assert.deepEqual(block.options, { baseURL: 'https://example.com/v1', apiKey: 'secret' })
+  assert.deepEqual(block.models, { m1: { name: 'm1' } })
+})
+
+test('getGoModelMeta returns snapshot for known model and fallback otherwise', () => {
+  const known = getGoModelMeta('kimi-k3')
+  assert.ok(GO_MODEL_META['kimi-k3'])
+  assert.ok(known.output > 0)
+  assert.equal(known.reasoning, true)
+  assert.deepEqual(getGoModelMeta('does-not-exist'), GO_MODEL_FALLBACK)
+})
+
+test('go models get reasoning + limit + modalities (enables auto variants)', () => {
+  const ordered = [
+    { id: 'kimi-k3', shortName: 'kimi-k3', vision: false, api: 'chat' },
+    { id: 'minimax-m3', shortName: 'minimax-m3', vision: false, api: 'messages' },
+    { id: 'unknown-go-model', shortName: 'unknown', vision: false, api: 'chat' },
+  ]
+  const block = buildModelsBlock(ordered, { numbering: '01.', go: true })
+
+  for (const id of ['kimi-k3', 'minimax-m3', 'unknown-go-model']) {
+    assert.equal(block[id].reasoning, true, `${id} reasoning`)
+    assert.ok(block[id].limit.context > 0, `${id} context`)
+    // Anthropic variants memakai limit.output -> harus > 4 agar budget positif.
+    assert.ok(block[id].limit.output > 4, `${id} output`)
+  }
+  assert.equal(block['kimi-k3'].limit.context, GO_MODEL_META['kimi-k3'].context)
+  assert.deepEqual(block['kimi-k3'].modalities.input, GO_MODEL_META['kimi-k3'].input)
+  // Unknown -> fallback
+  assert.equal(block['unknown-go-model'].limit.context, GO_MODEL_FALLBACK.context)
+  assert.equal(block['unknown-go-model'].limit.output, GO_MODEL_FALLBACK.output)
+})
+
+test('non-go models do not get reasoning/limit fields', () => {
+  const block = buildModelsBlock(
+    [{ id: 'gpt-4o', shortName: 'gpt-4o', vision: false, api: 'chat' }],
+    { numbering: '01.', go: false },
+  )
+  assert.equal('reasoning' in block['gpt-4o'], false)
+  assert.equal('limit' in block['gpt-4o'], false)
 })
 
 test('writeOpencodeConfig backs up, preserves others and writes atomically', () => {

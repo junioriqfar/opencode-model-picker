@@ -61,6 +61,7 @@ When no config file exists (`~/.config/opencode-model-picker/config.json` not fo
 1. **Language** — `English` / `Indonesia`
 2. **Default timeout** — 1–300 seconds
 3. **Numbering style** — `01.` / `1.` / `001.` / `01 -` / `none`
+4. **Sort order** — `Built-in score (coding)` / `Alphabetical (A-Z)`
 
 All settings are saved immediately and applied to the current session.
 
@@ -69,9 +70,9 @@ All settings are saved immediately and applied to the current session.
 1. **Initial action** — choose between *Use saved provider*, *Manage saved providers* (edit name/base URL/API key, delete — bottom option is **Kembali** / **Back** in green), *Add new provider*, *Settings*, or *Exit*.
 2. **Fetch models** — the app calls `GET {baseURL}/v1/models`. On failure, error is shown and you return to the main menu (app does not close).
 3. **Select models** — after fetching, choose **Select all (X models)** to test every model, or **Custom** to pick specific models via multiselect (space to select, enter to continue). If no model is selected in Custom mode, you return to the main menu.
-4. **Test access** — each model is tested with a small request using the timeout from **Settings → Default timeout** (initially **15 seconds**, configurable 1–300 seconds, stored in settings). The right endpoint is chosen automatically: `/chat/completions` by default, `/messages` for Anthropic-compatible base URLs (`.../anthropic`) or OpenCode Go MiniMax/Qwen, and `/responses` for Go Grok/GPT-Luna/Muse Spark. If a chat request is rejected for using `max_tokens`, it retries once with `max_completion_tokens` (reasoning models). The spinner stays on a single line per model (`model-id ✓/✗ — short message`), sanitized to one line and truncated (handles OpenRouter `Provider returned error` wrapping by extracting inner message). Rate-limited requests are retried once automatically. A 500ms delay between models reduces burst rate-limiting.
+4. **Test access (optional)** — after selecting models, the app asks **Test each model access?** (`Yes` default / `No`). Choosing **No** skips all per-model requests and saves every selected model as-is (no dead/EOL filtering; endpoint/npm is inferred from the model name or base URL). Choosing **Yes** tests each model with a small request using the timeout from **Settings → Default timeout** (initially **15 seconds**, configurable 1–300 seconds, stored in settings). The right endpoint is chosen automatically: `/chat/completions` by default, `/messages` for Anthropic-compatible base URLs (`.../anthropic`) or OpenCode Go MiniMax/Qwen, and `/responses` for Go Grok/GPT-Luna/Muse Spark. If a chat request is rejected for using `max_tokens`, it retries once with `max_completion_tokens` (reasoning models). The spinner stays on a single line per model (`model-id ✓/✗ — short message`), sanitized to one line and truncated (handles OpenRouter `Provider returned error` wrapping by extracting inner message). Rate-limited requests are retried once automatically. A 500ms delay between models reduces burst rate-limiting.
 5. **Recap** — shows `✓ X working  ✗ Y dead/EOL/not found  ! Z temporary (timeout/rate-limit)` and lists each dead/warn model on its own single line. If **0 working**, it shows `No working models...` and returns to the main menu instead of closing.
-6. **Auto scoring** — working models are ranked by coding capability score (reasoning, tools, context, name heuristics). Ranking is shown as a single non-interactive block with numbers, no enter required:
+6. **Sorting** — working models are ordered according to **Settings → Sort order**: either by coding capability score (reasoning, tools, context, name heuristics) or alphabetically (A–Z). The list is shown as a single non-interactive block with numbers, no enter required:
    ```
    Initial ranking (auto score):
      1. nvidia/minimaxai/minimax-m3 (score 85)
@@ -95,8 +96,20 @@ Available from the main menu → **Settings** (Back button is green by design):
   - `001.` → `001. model`, `002. model` (padded 3 digits)
   - `01 -` → `01 - model`, `02 - model`
   - `none` → `model` (no prefix)
+- **Sort order** — how working models are ordered before saving: `Built-in score (coding)` (default) or `Alphabetical (A-Z)`. Manual reordering is still available after sorting.
 
 Settings are stored in `~/.config/opencode-model-picker/config.json` alongside saved providers and support migration from older configs.
+
+## Variants (OpenCode Go)
+
+For an **OpenCode Go** base URL, the tool writes `reasoning: true` plus `limit` (context/output) for each model. OpenCode then generates model **variants** automatically (e.g. `low`, `medium`, `high` for `@ai-sdk/openai-compatible` / `@ai-sdk/openai`, or `high`, `max` for `@ai-sdk/anthropic`).
+
+In OpenCode:
+- Press **`ctrl+t`** (`variant_cycle`) to cycle variants.
+- Or run the **`/variants`** command to open the *Select variant* dialog and pick one (including `Default`).
+- The choice is saved per provider/model.
+
+Limits/capabilities come from a snapshot of [models.dev](https://models.dev) (`opencode-go`). Regenerate with `npm run sync:models`. Unknown/new models fall back to `context: 131072`, `output: 8192`, `reasoning: true`.
 
 ## Project Structure
 
@@ -105,15 +118,19 @@ src/
 ├── cli.js        # interactive flow (@clack/prompts) + i18n + settings + outer loop (no auto-close) + single-line spinner
 ├── i18n.js       # translations (en/id) + numbering styles
 ├── provider.js   # GET /v1/models + endpoint selection (chat/messages/responses) + Go x-opencode-session + capability normalization + OpenRouter inner error extraction
+├── go-models.js  # bundled OpenCode Go metadata snapshot (models.dev) for auto variants
 ├── scoring.js    # auto scoring for coding capability
-├── config.js     # app config load/save (~/.config/opencode-model-picker/) + settings (language/timeout/numbering)
-├── opencode.js   # safe merge into OpenCode config (numbering-aware) + .bak backup + atomic write
+├── config.js     # app config load/save (~/.config/opencode-model-picker/) + settings (language/timeout/numbering/sort)
+├── opencode.js   # safe merge into OpenCode config (numbering-aware) + Go variants + .bak backup + atomic write
 └── utils.js      # OpenCode-compatible paths, JSONC parser (comments + trailing commas), atomic write
+
+scripts/
+└── sync-go-models.mjs  # regenerate go-models.js from models.dev
 
 test/
 ├── utils.test.js     # JSONC parser + config path resolution
 ├── provider.test.js  # endpoint selection, session header, error classification
-└── opencode.test.js  # model block/npm + backup/atomic write
+└── opencode.test.js  # model block/npm + Go variants + backup/atomic write
 ```
 
 ## Notes
@@ -123,6 +140,9 @@ test/
 - A `.bak` backup is created next to the OpenCode config before every save, since the file is rewritten as plain JSON (comments/formatting are not preserved).
 - For providers mixing protocols, the provider-level `npm` is set to the **majority** endpoint's package (`@ai-sdk/openai-compatible` / `@ai-sdk/anthropic` / `@ai-sdk/openai`) and the minority models get a per-model `provider.npm` override, so as little as possible depends on per-model overrides.
 - When a provider omits `capabilities`, they are inferred from `architecture`/`supported_parameters` (OpenRouter/gateway style), so auto-scoring still has data to work with.
+- OpenCode Go's `GET /v1/models` returns only ids, so reasoning/limit metadata for variants is bundled from models.dev (see `src/go-models.js`).
+- Skipping the access test writes every selected model without verification — useful when the provider's `/v1/models` is authoritative (e.g. OpenCode Go). Endpoint/`npm` is then inferred (`guessApi`), not tested.
+- Navigation: **ESC** returns to the previous prompt, **Ctrl+C** exits the app. At the main menu, ESC also exits. Settings that were already confirmed are kept when you go back.
 - Test spinner is forced to one line per model (newlines collapsed, truncated to 80 chars) to avoid spamming the terminal on verbose provider errors (e.g. `openrouter/google/lyria-3-pro-preview`).
 - If no model works or fetch fails, the app returns to the main menu instead of exiting.
 - After writing to OpenCode, **restart opencode** and select the model via `/models`.
