@@ -19,6 +19,9 @@ import {
   upsertProvider,
   updateProvider,
   deleteProvider,
+  loadRawAppConfig,
+  ensureMachineEncryption,
+  migrateFromPassword,
 } from './config.js'
 import { listModels, testModel, sleep, isOpencodeZen, guessApi } from './provider.js'
 import { attachScores, sortByScore, sortByName } from './scoring.js'
@@ -30,8 +33,10 @@ import {
   readOpencodeConfig,
   providerExists,
 } from './opencode.js'
+import { getAuthApiKey, getAuthEntry, writeAuthApiKey, renameAuthKey } from './auth.js'
+import { fetchLatestRelease } from './update.js'
 import { existsSync } from 'node:fs'
-import { APP_NAME, appConfigPath } from './utils.js'
+import { APP_NAME, appConfigPath, opencodeAuthPath } from './utils.js'
 import { t, formatNumber, NUMBERING_STYLES } from './i18n.js'
 
 const BACK = Symbol('back')
@@ -60,11 +65,19 @@ function oneLine(str, max = 80) {
 }
 
 async function main() {
-  let config = loadAppConfig()
-  let lang = config.settings.language
+  const rawConfig = loadRawAppConfig()
+  let lang = rawConfig.settings.language
   const tr = (key, params) => t(lang, key, params)
 
   intro(pc.bold(pc.cyan(` ${APP_NAME} — ${tr('intro')}`)))
+
+  if (rawConfig.security?.mode === 'password' && !(await migrateLegacyConfig(lang))) {
+    return handleCancel(lang)
+  }
+
+  let config = loadAppConfig()
+  lang = config.settings.language
+  ensureMachineEncryption()
 
   // ---------- First run: if no config file, prompt all settings ----------
   if (!existsSync(appConfigPath())) {
@@ -188,6 +201,16 @@ async function main() {
             value: 'sort',
             label: `${t(lang, 'settingsSort')}: ${config.settings.sort === 'name' ? t(lang, 'sortName') : t(lang, 'sortScore')}`,
           },
+          {
+            value: 'storage',
+            label: `${t(lang, 'settingsStorage')}: ${
+              config.settings.credentialStorage === 'auth' ? t(lang, 'storageAuth') : t(lang, 'storageConfig')
+            }`,
+          },
+          {
+            value: 'updates',
+            label: `${t(lang, 'settingsUpdateCheck')}: ${config.settings.checkUpdates ? t(lang, 'toggleOn') : t(lang, 'toggleOff')}`,
+          },
           { value: 'back', label: pc.green(t(lang, 'settingsBack')) },
         ],
       })
@@ -265,8 +288,40 @@ async function main() {
         config.settings.sort = sortChoice
         saveAppConfig(config)
         log.success(t(lang, 'sortUpdated', { sort: sortChoice }))
+      } else if (choice === 'storage') {
+        const picked = await select({
+          message: t(lang, 'settingsStorage'),
+          options: [
+            { value: 'auth', label: t(lang, 'storageAuth') },
+            { value: 'config', label: t(lang, 'storageConfig') },
+          ],
+          initialValue: config.settings.credentialStorage,
+        })
+        if (isCancel(picked)) {
+          if (isBack(picked)) continue
+          return handleCancel(lang)
+        }
+        config.settings.credentialStorage = picked
+        saveAppConfig(config)
+        log.success(
+          t(lang, 'storageUpdated', {
+            storage: picked === 'auth' ? t(lang, 'storageAuth') : t(lang, 'storageConfig'),
+          }),
+        )
+      } else if (choice === 'updates') {
+        config.settings.checkUpdates = !config.settings.checkUpdates
+        saveAppConfig(config)
+        log.success(
+          t(lang, 'updateCheckUpdated', {
+            status: config.settings.checkUpdates ? t(lang, 'toggleOn') : t(lang, 'toggleOff'),
+          }),
+        )
       }
     }
+  }
+
+  if (config.settings.checkUpdates) {
+    await runUpdateCheck(lang, { manual: false })
   }
 
   appLoop: while (true) {
@@ -281,6 +336,7 @@ async function main() {
     if (hasSaved) options.push({ value: 'manage', label: t(lang, 'actionManage') })
     options.push({ value: 'new', label: t(lang, 'actionNew') })
     options.push({ value: 'settings', label: t(lang, 'actionSettings') })
+    options.push({ value: 'updates', label: t(lang, 'actionUpdates') })
     if (hasSaved) options.push({ value: 'exit', label: pc.red(t(lang, 'actionExit')) })
 
     const startChoice = await select({
@@ -299,6 +355,10 @@ async function main() {
     if (startChoice === 'settings') {
       await handleSettingsMenu()
       // refresh intro? just continue loop (lang may have changed, re-show intro? keep simple)
+      continue
+    }
+    if (startChoice === 'updates') {
+      await runUpdateCheck(lang, { manual: true })
       continue
     }
 
@@ -601,6 +661,7 @@ async function main() {
       }))
 
       const isGo = isOpencodeZen(provider.baseURL)
+      const useAuthStorage = config.settings.credentialStorage === 'auth'
       const providerNpm = pickProviderNpm(ordered)
       const modelsBlock = buildModelsBlock(ordered, {
         numbering: config.settings.numbering,
@@ -611,12 +672,21 @@ async function main() {
         key,
         npm: providerNpm,
         baseURL: provider.baseURL,
-        apiKey: provider.apiKey,
+        apiKey: useAuthStorage ? undefined : provider.apiKey,
         models: modelsBlock,
       })
+      const authEntry = useAuthStorage ? getAuthEntry(key, lang) : null
+      const authConflict = !!(authEntry && authEntry.type !== 'api')
 
       const { path: ocPath } = readOpencodeConfig(lang)
       log.info(t(lang, 'targetConfig', { path: ocPath }))
+      if (useAuthStorage) {
+        log.info(t(lang, 'authStorageTarget', { path: opencodeAuthPath() }))
+      } else {
+        log.info(t(lang, 'inlineStorageTarget'))
+        log.warn(t(lang, 'inlinePlaintextWarn'))
+      }
+      if (authConflict) log.warn(t(lang, 'authEntryConflict', { key }))
 
       log.message(pc.bold(t(lang, 'listToWrite')))
       ordered.forEach((m, i) => {
@@ -654,6 +724,17 @@ async function main() {
       }
 
       if (save) {
+        if (useAuthStorage) {
+          try {
+            const authRes = writeAuthApiKey(key, provider.apiKey, lang)
+            if (authRes.backupPath) {
+              log.info(pc.dim(t(lang, 'authBackupCreated', { path: authRes.backupPath })))
+            }
+          } catch (err) {
+            log.error(err.message ?? t(lang, 'errUnknown'))
+            continue
+          }
+        }
         const { backupPath } = writeOpencodeConfig(key, providerBlock, lang)
         if (backupPath) log.info(pc.dim(t(lang, 'backupCreated', { path: backupPath })))
 
@@ -698,11 +779,62 @@ async function main() {
   }
 }
 
+async function migrateLegacyConfig(lang) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const pw = await password({ message: t(lang, 'legacyPasswordPrompt') })
+    if (isCancel(pw)) return false
+    if (migrateFromPassword(pw)) {
+      log.success(t(lang, 'legacyPasswordMigrated'))
+      return true
+    }
+    log.error(t(lang, 'legacyPasswordFailed'))
+  }
+  return false
+}
+
+async function runUpdateCheck(lang, { manual = false } = {}) {
+  const s = spinner()
+  s.start(t(lang, 'checkingUpdates'))
+  const result = await fetchLatestRelease()
+  s.stop(t(lang, 'updateChecked'))
+
+  if (result.ok) {
+    if (result.update) {
+      log.warn(
+        t(lang, 'updateAvailable', {
+          version: result.version,
+          current: result.current,
+          url: result.url,
+        }),
+      )
+    } else if (manual) {
+      log.success(t(lang, 'updateUpToDate', { version: result.current }))
+    }
+    return
+  }
+
+  if (!manual) return
+  if (result.error === 'http') {
+    log.error(t(lang, 'updateCheckFailed', { reason: `HTTP ${result.status}` }))
+  } else {
+    const key = {
+      norelease: 'updateNoRelease',
+      ratelimit: 'updateRateLimited',
+      badresponse: 'updateBadResponse',
+      timeout: 'updateTimeout',
+      network: 'updateNetwork',
+    }[result.error]
+    log.error(key ? t(lang, key) : t(lang, 'updateCheckFailed', { reason: result.error }))
+  }
+}
+
 async function addNewProvider(config, lang) {
   // ESC = kembali (keluar dari tambah provider), Ctrl+C = keluar aplikasi.
   let step = 'url'
   let baseURL = ''
   let apiKey = ''
+  let name = ''
+  let authKey = null
 
   while (true) {
     if (step === 'url') {
@@ -717,7 +849,48 @@ async function addNewProvider(config, lang) {
         return handleCancel(lang)
       }
       baseURL = value.trim()
-      step = 'key'
+      step = 'name'
+      continue
+    }
+
+    if (step === 'name') {
+      const value = await text({
+        message: t(lang, 'providerNamePrompt'),
+        placeholder: t(lang, 'providerNamePlaceholder'),
+        initialValue: name || undefined,
+        validate: (v) => (v && v.trim() ? undefined : t(lang, 'providerNameRequired')),
+      })
+      if (isCancel(value)) {
+        if (isBack(value)) {
+          step = 'url'
+          continue
+        }
+        return handleCancel(lang)
+      }
+      name = value.trim()
+      authKey = getAuthApiKey(name, lang)
+      step = authKey ? 'authImport' : 'key'
+      continue
+    }
+
+    if (step === 'authImport') {
+      const use = await confirm({
+        message: t(lang, 'useAuthKeyConfirm', { name }),
+        initialValue: true,
+      })
+      if (isCancel(use)) {
+        if (isBack(use)) {
+          step = 'name'
+          continue
+        }
+        return handleCancel(lang)
+      }
+      if (use) {
+        apiKey = authKey
+        step = 'save'
+      } else {
+        step = 'key'
+      }
       continue
     }
 
@@ -728,30 +901,18 @@ async function addNewProvider(config, lang) {
       })
       if (isCancel(value)) {
         if (isBack(value)) {
-          step = 'url'
+          step = authKey ? 'authImport' : 'name'
           continue
         }
         return handleCancel(lang)
       }
       apiKey = value.trim()
-      step = 'name'
+      step = 'save'
       continue
     }
 
-    if (step === 'name') {
-      const value = await text({
-        message: t(lang, 'providerNamePrompt'),
-        placeholder: t(lang, 'providerNamePlaceholder'),
-        validate: (v) => (v && v.trim() ? undefined : t(lang, 'providerNameRequired')),
-      })
-      if (isCancel(value)) {
-        if (isBack(value)) {
-          step = 'key'
-          continue
-        }
-        return handleCancel(lang)
-      }
-      const provider = { name: value.trim(), baseURL, apiKey }
+    if (step === 'save') {
+      const provider = { name, baseURL, apiKey }
       upsertProvider(config, provider)
       saveAppConfig(config)
       return provider
@@ -786,6 +947,7 @@ async function manageProviders(lang) {
         { value: 'rename', label: t(lang, 'rename') },
         { value: 'url', label: t(lang, 'editUrl') },
         { value: 'apikey', label: t(lang, 'editApiKey') },
+        { value: 'importAuth', label: t(lang, 'importAuthKey') },
         { value: 'delete', label: pc.red(t(lang, 'deleteProvider')) },
         { value: 'back', label: pc.green(t(lang, 'back')) },
       ],
@@ -808,9 +970,32 @@ async function manageProviders(lang) {
         if (isBack(name)) continue
         return handleCancel(lang)
       }
-      updateProvider(config, idx, { name: name.trim() })
+      const oldName = config.providers[idx].name
+      const newName = name.trim()
+      updateProvider(config, idx, { name: newName })
       saveAppConfig(config)
-      log.success(t(lang, 'renamedTo', { name: name.trim() }))
+      log.success(t(lang, 'renamedTo', { name: newName }))
+      if (oldName !== newName && getAuthApiKey(oldName, lang)) {
+        const move = await confirm({
+          message: t(lang, 'renameAuthConfirm', { old: oldName, new: newName }),
+          initialValue: false,
+        })
+        if (isCancel(move)) {
+          if (isBack(move)) continue
+          return handleCancel(lang)
+        }
+        if (move) {
+          try {
+            if (renameAuthKey(oldName, newName, lang)) {
+              log.success(t(lang, 'authRenamed', { name: newName }))
+            } else {
+              log.warn(t(lang, 'authRenameSkipped', { name: newName }))
+            }
+          } catch (err) {
+            log.error(err.message ?? t(lang, 'errUnknown'))
+          }
+        }
+      }
     } else if (action === 'url') {
       const url = await text({
         message: t(lang, 'newUrl'),
@@ -836,6 +1021,16 @@ async function manageProviders(lang) {
       updateProvider(config, idx, { apiKey: key.trim() })
       saveAppConfig(config)
       log.success(t(lang, 'apiKeyUpdated'))
+    } else if (action === 'importAuth') {
+      const name = config.providers[idx].name
+      const imported = getAuthApiKey(name, lang)
+      if (!imported) {
+        log.warn(t(lang, 'authKeyNotFound', { name }))
+      } else {
+        updateProvider(config, idx, { apiKey: imported })
+        saveAppConfig(config)
+        log.success(t(lang, 'authKeyImported'))
+      }
     } else if (action === 'delete') {
       const ok = await confirm({
         message: t(lang, 'deleteConfirm', { name: config.providers[idx].name }),

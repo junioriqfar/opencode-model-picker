@@ -60,6 +60,17 @@ test('buildProviderBlock uses the key as the provider name', () => {
   assert.deepEqual(block.models, { m1: { name: 'm1' } })
 })
 
+test('buildProviderBlock omits apiKey when credentials live in auth.json', () => {
+  const block = buildProviderBlock({
+    key: 'demo',
+    npm: '@ai-sdk/openai-compatible',
+    baseURL: 'https://example.com/v1',
+    models: { m1: { name: 'm1' } },
+  })
+  assert.deepEqual(block.options, { baseURL: 'https://example.com/v1' })
+  assert.equal('apiKey' in block.options, false)
+})
+
 test('getGoModelMeta returns snapshot for known model and fallback otherwise', () => {
   const known = getGoModelMeta('kimi-k3')
   assert.ok(GO_MODEL_META['kimi-k3'])

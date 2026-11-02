@@ -29,7 +29,7 @@ node src/cli.js
 npm test
 ```
 
-Uses the built-in `node:test` runner (no extra dependencies). Covers the JSONC parser (comments/trailing commas), OpenCode config path resolution, backup/atomic write, endpoint selection (`chat`/`messages`/`responses`), the `x-opencode-session` header for OpenCode Go/Zen, `max_completion_tokens` fallback, and model-block/npm generation.
+Uses the built-in `node:test` runner (no extra dependencies). Covers the JSONC parser (comments/trailing commas), OpenCode config path resolution, backup/atomic write, endpoint selection (`chat`/`messages`/`responses`), the `x-opencode-session` header for OpenCode Go/Zen, `max_completion_tokens` fallback, model-block/npm generation, automatic machine-bound config encryption, legacy password migration, `auth.json` read/write/backup/import, and update-check semver/API handling.
 
 ## Build Executable (Windows, macOS, Linux)
 
@@ -63,11 +63,11 @@ When no config file exists (`~/.config/opencode-model-picker/config.json` not fo
 3. **Numbering style** — `01.` / `1.` / `001.` / `01 -` / `none`
 4. **Sort order** — `Built-in score (coding)` / `Alphabetical (A-Z)`
 
-All settings are saved immediately and applied to the current session.
+All settings are saved immediately and applied to the current session. API keys are encrypted automatically.
 
 ## Workflow
 
-1. **Initial action** — choose between *Use saved provider*, *Manage saved providers* (edit name/base URL/API key, delete — bottom option is **Kembali** / **Back** in green), *Add new provider*, *Settings*, or *Exit*.
+1. **Initial action** — choose between *Use saved provider*, *Manage saved providers* (edit name/base URL/API key, import the key from `auth.json`, delete — bottom option is **Kembali** / **Back** in green), *Add new provider*, *Settings*, *Check for updates*, or *Exit*.
 2. **Fetch models** — the app calls `GET {baseURL}/v1/models`. On failure, error is shown and you return to the main menu (app does not close).
 3. **Select models** — after fetching, choose **Select all (X models)** to test every model, or **Custom** to pick specific models via multiselect (space to select, enter to continue). If no model is selected in Custom mode, you return to the main menu.
 4. **Test access (optional)** — after selecting models, the app asks **Test each model access?** (`Yes` default / `No`). Choosing **No** skips all per-model requests and saves every selected model as-is (no dead/EOL filtering; endpoint/npm is inferred from the model name or base URL). Choosing **Yes** tests each model with a small request using the timeout from **Settings → Default timeout** (initially **15 seconds**, configurable 1–300 seconds, stored in settings). The right endpoint is chosen automatically: `/chat/completions` by default, `/messages` for Anthropic-compatible base URLs (`.../anthropic`) or OpenCode Go MiniMax/Qwen, and `/responses` for Go Grok/GPT-Luna/Muse Spark. If a chat request is rejected for using `max_tokens`, it retries once with `max_completion_tokens` (reasoning models). The spinner stays on a single line per model (`model-id ✓/✗ — short message`), sanitized to one line and truncated (handles OpenRouter `Provider returned error` wrapping by extracting inner message). Rate-limited requests are retried once automatically. A 500ms delay between models reduces burst rate-limiting.
@@ -81,7 +81,7 @@ All settings are saved immediately and applied to the current session.
 7. **Manual edit** — optionally reorder via `Select model to move → Move to position (1-N)`. Current order is also shown as `1. id (score 85)` in one block.
 8. **Display name** — choose auto short names (take the last segment of the ID) or enter them manually per model. Sequence numbers are auto-generated from position using the **Settings → Numbering style** (e.g. `01.`, `1.`, `001.`, `01 -`, or `none`).
 9. **Preview** — name list + configuration block are shown for review before saving.
-10. **Save** — follows OpenCode's own config resolution: picks the first existing file of `opencode.jsonc` → `opencode.json` → `config.json` inside `~/.config/opencode` (or `$OPENCODE_CONFIG_DIR` when set), defaulting to `opencode.jsonc`. A `.bak` backup is written before saving; other configuration is preserved, but JSONC comments and original formatting are not. If the provider name **already exists**, the app warns that all existing models for that provider will be deleted and replaced with the current list.
+10. **Save** — follows OpenCode's own config resolution: picks the first existing file of `opencode.jsonc` → `opencode.json` → `config.json` inside `~/.config/opencode` (or `$OPENCODE_CONFIG_DIR` when set), defaulting to `opencode.jsonc`. With **Settings → Credential storage = auth.json**, the API key is written to `~/.local/share/opencode/auth.json` (mode `0600`) and `opencode.json` keeps only `baseURL`; with `opencode.json`, the key is written inline as before. A `.bak` backup is written before saving either file; other configuration is preserved, but JSONC comments and original formatting are not. If the provider name **already exists**, the app warns that all existing models for that provider will be deleted and replaced with the current list.
 11. **Repeat** — after save/cancel, the app asks **Do you want to run again?** (`If yes, you will return to the main menu.`). If **Yes**, it loops back to *Initial action*; if **No** (or Enter), it exits.
 
 ## Settings
@@ -97,8 +97,26 @@ Available from the main menu → **Settings** (Back button is green by design):
   - `01 -` → `01 - model`, `02 - model`
   - `none` → `model` (no prefix)
 - **Sort order** — how working models are ordered before saving: `Built-in score (coding)` (default) or `Alphabetical (A-Z)`. Manual reordering is still available after sorting.
+- **Credential storage** — `opencode auth.json` (default) writes keys to `~/.local/share/opencode/auth.json` (mode `0600`); `opencode.json` writes `options.apiKey` inline.
+- **Update check** — `On` by default. Checks GitHub Releases on every startup and shows a notice only when a newer version exists. Use **Check for updates** in the main menu for a manual check with status/error details.
 
 Settings are stored in `~/.config/opencode-model-picker/config.json` alongside saved providers and support migration from older configs.
+
+## Credential Security & Storage
+
+- **App config encryption** — `providers[].apiKey` values in `~/.config/opencode-model-picker/config.json` are automatically stored as `enc:v1:` blobs (AES-256-GCM with a key derived from the current user/machine). No password is stored or prompted. Existing plaintext configs are encrypted automatically on startup.
+- **What this protects** — it keeps tokens from being readable at a glance in the file, backups, or occasional sharing. It is obfuscation bound to the current machine/user, not protection against someone who already has access to that account. Copying the config to another machine makes the keys unreadable (re-enter them).
+- **OpenCode storage is not encrypted** — OpenCode needs the plaintext key at runtime. `auth.json` is plain text with mode `0600`, and `opencode.json` inline keys are plain text too. Encryption protects the picker's own config only.
+- **auth.json format** — entries use `{ "provider-id": { "type": "api", "key": "..." } }`. Other providers and OAuth entries are preserved; a `.bak` backup is created before each write. When saving with an existing non-API entry for the same provider, the app warns before replacing it.
+- **Import** — when adding a provider, if the name matches an API entry in `auth.json`, the app offers to reuse that key. Existing saved providers can also import via *Manage saved providers → Import key from auth.json*.
+- **OpenCode v2 note** — newer OpenCode builds migrate legacy `auth.json` credentials into their database once. If your build no longer reads `auth.json` directly, re-import/re-login through OpenCode after saving.
+- **Upgrading from the master-password build** — if your config was created by that build, the app asks for that old password once at startup, migrates the keys to automatic machine-bound encryption, and never asks again.
+
+## Update Check
+
+- On every startup (unless disabled in Settings), the app queries the latest GitHub release at `https://github.com/junioriqfar/opencode-model-picker/releases/latest`.
+- If a newer version exists, it shows the version and release URL — it never downloads or replaces files automatically.
+- Manual **Check for updates** reports up-to-date, no-release, rate-limit, timeout, and network errors. Automatic checks stay silent on failure.
 
 ## Variants (OpenCode Go)
 
@@ -120,8 +138,12 @@ src/
 ├── provider.js   # GET /v1/models + endpoint selection (chat/messages/responses) + Go x-opencode-session + capability normalization + OpenRouter inner error extraction
 ├── go-models.js  # bundled OpenCode Go metadata snapshot (models.dev) for auto variants
 ├── scoring.js    # auto scoring for coding capability
-├── config.js     # app config load/save (~/.config/opencode-model-picker/) + settings (language/timeout/numbering/sort)
+├── config.js     # app config + settings + automatic machine-bound encryption
+├── crypto.js     # AES-256-GCM + HKDF (legacy password migration helpers)
+├── auth.js       # OpenCode auth.json read/write/backup/import
 ├── opencode.js   # safe merge into OpenCode config (numbering-aware) + Go variants + .bak backup + atomic write
+├── update.js     # GitHub Releases update check + semver compare
+├── version.js    # single source of truth for the app version
 └── utils.js      # OpenCode-compatible paths, JSONC parser (comments + trailing commas), atomic write
 
 scripts/
@@ -130,12 +152,17 @@ scripts/
 test/
 ├── utils.test.js     # JSONC parser + config path resolution
 ├── provider.test.js  # endpoint selection, session header, error classification
-└── opencode.test.js  # model block/npm + Go variants + backup/atomic write
+├── opencode.test.js  # model block/npm + Go variants + backup/atomic write
+├── config.test.js    # settings, atomic save, automatic encryption + legacy migration
+├── crypto.test.js    # encryption round-trip, machine key, tamper detection
+├── auth.test.js      # auth.json path/write/backup/import/rename
+├── update.test.js    # semver compare + GitHub API handling
+└── version.test.js   # VERSION matches package.json
 ```
 
 ## Notes
 
-- App config (saved providers + settings) is stored at `~/.config/opencode-model-picker/config.json` (API keys are plain text — keep this file secure).
+- App config (saved providers + settings) is stored at `~/.config/opencode-model-picker/config.json`; API keys are encrypted automatically with a machine-bound key.
 - OpenCode config path follows OpenCode itself: `~/.config/opencode` on all platforms (Windows included, via XDG), or `$OPENCODE_CONFIG_DIR` when set. The tool reads JSONC with comments and trailing commas.
 - A `.bak` backup is created next to the OpenCode config before every save, since the file is rewritten as plain JSON (comments/formatting are not preserved).
 - For providers mixing protocols, the provider-level `npm` is set to the **majority** endpoint's package (`@ai-sdk/openai-compatible` / `@ai-sdk/anthropic` / `@ai-sdk/openai`) and the minority models get a per-model `provider.npm` override, so as little as possible depends on per-model overrides.

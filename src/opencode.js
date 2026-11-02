@@ -90,13 +90,12 @@ export function buildModelsBlock(
  * @param {Object} opts.models - hasil buildModelsBlock
  */
 export function buildProviderBlock({ key, npm, baseURL, apiKey, models }) {
+  const options = { baseURL }
+  if (apiKey) options.apiKey = apiKey
   return {
     npm,
     name: key,
-    options: {
-      baseURL,
-      apiKey,
-    },
+    options,
     models,
   }
 }

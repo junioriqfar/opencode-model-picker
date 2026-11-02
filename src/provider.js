@@ -1,5 +1,6 @@
 import { t } from './i18n.js'
 import { randomUUID } from 'node:crypto'
+import { VERSION } from './version.js'
 
 function oneLine(str, max = 120) {
   if (!str) return ''
@@ -9,7 +10,7 @@ function oneLine(str, max = 120) {
 const TEST_MESSAGE = 'Say hi'
 const TEST_MAX_TOKENS = 16
 const TEST_TIMEOUT = 15000
-const PICKER_USER_AGENT = 'opencode-model-picker/1.4.0'
+const PICKER_USER_AGENT = `opencode-model-picker/${VERSION}`
 const PICKER_CLIENT_NAME = 'opencode-model-picker'
 
 // Stable session id per process. OpenCode Go (since 2026-09-06) requires a
@@ -31,7 +32,7 @@ export function getPickerSessionId() {
 
 export function isOpencodeZen(baseURL) {
   const u = String(baseURL ?? '').toLowerCase()
-  return u.includes('opencode.ai') && (u.includes('/zen') || u.includes('/go/'))
+  return u.includes('opencode.ai') && (/\/zen(\/|$)/.test(u) || /\/go(\/|$)/.test(u))
 }
 
 function buildApiHeaders(apiKey, baseURL, extra = {}) {
@@ -237,7 +238,7 @@ async function attemptChat({ baseURL, apiKey, model, timeoutMs, lang, tokenParam
         ok: true,
         status: res.status,
         api: 'chat',
-        message: 'Respons kosong (mungkin token habis untuk reasoning)',
+        message: t(lang, 'emptyResponse'),
         warning: true,
         detail: oneLine(text, 200),
       }
@@ -300,7 +301,7 @@ async function attemptMessages({ baseURL, apiKey, model, timeoutMs, lang }) {
         ok: true,
         status: res.status,
         api: 'messages',
-        message: 'Respons kosong (mungkin token habis untuk reasoning)',
+        message: t(lang, 'emptyResponse'),
         warning: true,
         detail: oneLine(text, 200),
       }
@@ -464,12 +465,12 @@ export async function testModel({
       const result = await run(api)
       if (result.ok) return result
       if (api === first) firstResult = result
-      // Missing session header: semua endpoint akan gagal sama -> langsung kembalikan.
-      if (result.error === 'session') return result
-      // Error non-fallback (timeout/network/auth/dll) pada endpoint tebakan: jangan tebak lain.
-      if (!shouldTryOtherGoEndpoints(result) && api === first) return result
+      // Timeout/network/auth/payment/session/html tidak akan membaik dengan
+      // endpoint lain: hentikan dan tampilkan error terakhir yang ditemui.
+      if (!shouldTryOtherGoEndpoints(result)) return result
     }
-    // Semua endpoint gagal: kembalikan hasil endpoint tebakan (pesan paling relevan).
+    // Semua endpoint gagal dengan error yang mungkin karena salah endpoint:
+    // kembalikan hasil endpoint tebakan (pesan paling relevan).
     return firstResult ?? (await run(first))
   }
 
@@ -553,7 +554,9 @@ function classifyError(model, status, json, text, lang = 'en') {
     lower.includes('not found for account') ||
     lower.includes('404 page not found')
 
-  const isRateLimit = status === 429 || lower.includes('rate limit') || lower.includes('429')
+  // 404 + teks "rate limit" lebih mungkin route salah daripada rate limit.
+  const isRateLimit =
+    status === 429 || (status !== 404 && (lower.includes('rate limit') || lower.includes('429')))
 
   const isAuth = status === 401 || status === 403 || lower.includes('unauthorized')
 
@@ -583,16 +586,8 @@ function classifyError(model, status, json, text, lang = 'en') {
       dead: true,
     }
   }
-  if (notFound || isInvalidModel) {
-    return {
-      ok: false,
-      status,
-      error: 'notfound',
-      message: t(lang, 'errNotFound'),
-      detail: oneLine(detail, 200),
-      dead: true,
-    }
-  }
+  // Status auth/payment/rate-limit lebih kuat daripada teks body, supaya
+  // 401/402/429 yang menyebut "not found" tidak salah ditandai model mati.
   if (isAuth) {
     return {
       ok: false,
@@ -613,6 +608,26 @@ function classifyError(model, status, json, text, lang = 'en') {
       dead: true,
     }
   }
+  if (isRateLimit) {
+    return {
+      ok: false,
+      status,
+      error: 'ratelimit',
+      message: t(lang, 'errRateLimit'),
+      detail: oneLine(detail, 200),
+      dead: false,
+    }
+  }
+  if (notFound || isInvalidModel) {
+    return {
+      ok: false,
+      status,
+      error: 'notfound',
+      message: t(lang, 'errNotFound'),
+      detail: oneLine(detail, 200),
+      dead: true,
+    }
+  }
   const isBadRequest =
     status === 400 ||
     lower.includes('bad request') ||
@@ -628,16 +643,6 @@ function classifyError(model, status, json, text, lang = 'en') {
       message: oneLine(detail, 120) || t(lang, 'errBadRequest'),
       detail: oneLine(detail, 200),
       dead: true,
-    }
-  }
-  if (isRateLimit) {
-    return {
-      ok: false,
-      status,
-      error: 'ratelimit',
-      message: t(lang, 'errRateLimit'),
-      detail: oneLine(detail, 200),
-      dead: false,
     }
   }
   return {

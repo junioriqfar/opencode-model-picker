@@ -29,7 +29,7 @@ node src/cli.js
 npm test
 ```
 
-Memakai runner bawaan `node:test` (tanpa dependensi tambahan). Mencakup parser JSONC (komentar/trailing comma), resolusi path config OpenCode, backup/atomic write, pemilihan endpoint (`chat`/`messages`/`responses`), header `x-opencode-session` untuk OpenCode Go/Zen, fallback `max_completion_tokens`, serta pembuatan blok model/npm.
+Memakai runner bawaan `node:test` (tanpa dependensi tambahan). Mencakup parser JSONC (komentar/trailing comma), resolusi path config OpenCode, backup/atomic write, pemilihan endpoint (`chat`/`messages`/`responses`), header `x-opencode-session` untuk OpenCode Go/Zen, fallback `max_completion_tokens`, pembuatan blok model/npm, enkripsi config otomatis berbasis mesin, migrasi password lama, baca/tulis/backup/impor `auth.json`, serta perbandingan semver dan penanganan API cek update.
 
 ## Build executable (Windows, macOS, Linux)
 
@@ -63,11 +63,11 @@ Saat tidak ada file konfigurasi (`~/.config/opencode-model-picker/config.json` b
 3. **Gaya penomoran** — `01.` / `1.` / `001.` / `01 -` / `none`
 4. **Urutan** — `Skor bawaan (coding)` / `Abjad (A-Z)`
 
-Semua pengaturan langsung disimpan dan dipakai untuk sesi saat itu.
+Semua pengaturan langsung disimpan dan dipakai untuk sesi saat itu. API key dienkripsi otomatis.
 
 ## Alur
 
-1. **Aksi awal** — pilih antara *Gunakan provider tersimpan*, *Kelola provider tersimpan* (ubah nama/base URL/API key, hapus — opsi paling bawah adalah **Kembali** hijau), *Tambah provider baru*, *Pengaturan*, atau *Keluar*.
+1. **Aksi awal** — pilih antara *Gunakan provider tersimpan*, *Kelola provider tersimpan* (ubah nama/base URL/API key, impor key dari `auth.json`, hapus — opsi paling bawah adalah **Kembali** hijau), *Tambah provider baru*, *Pengaturan*, *Cek update*, atau *Keluar*.
 2. **Ambil model** — aplikasi memanggil `GET {baseURL}/v1/models`. Jika gagal, error ditampilkan dan kembali ke menu utama (tidak menutup aplikasi).
 3. **Pilih model** — setelah daftar ditemukan, pilih **Pilih semua (X model)** untuk tes semua model, atau **Custom** untuk memilih model tertentu via multiselect (spasi untuk pilih, enter untuk lanjut). Jika Custom tanpa pilihan, kembali ke menu utama.
 4. **Tes akses (opsional)** — setelah memilih model, aplikasi bertanya **Coba akses tiap model?** (`Ya` default / `Tidak`). Pilih **Tidak** untuk melewati semua request per model dan langsung menyimpan seluruh model terpilih (tanpa filter mati/EOL; endpoint/npm ditebak dari nama model atau base URL). Pilih **Ya** untuk menguji tiap model dengan request kecil menggunakan timeout dari **Pengaturan → Timeout default** (awal **15 detik**, bisa diubah 1–300 detik, tersimpan di settings). Endpoint dipilih otomatis: `/chat/completions` (default), `/messages` untuk base URL Anthropic-compatible (`.../anthropic`) atau OpenCode Go MiniMax/Qwen, dan `/responses` untuk Go Grok/GPT-Luna/Muse Spark. Jika request chat ditolak karena memakai `max_tokens`, otomatis dicoba ulang sekali dengan `max_completion_tokens` (model reasoning). Spinner tetap satu baris per model (`model-id ✓/✗ — pesan singkat`), disanitasi ke satu baris dan dipotong (menangani bungkusan OpenRouter `Provider returned error` dengan mengekstrak pesan inner). Rate-limit dicoba ulang sekali otomatis. Terdapat jeda 500ms antar model untuk mengurangi burst rate-limit.
@@ -81,7 +81,7 @@ Semua pengaturan langsung disimpan dan dipakai untuk sesi saat itu.
 7. **Edit manual** — opsional urutkan ulang via `Pilih model yang ingin dipindahkan → Pindah ke posisi (1-N)`. Urutan saat ini juga tampil sebagai `1. id (skor 85)` dalam satu blok.
 8. **Nama tampilan** — pilih nama pendek otomatis (ambil bagian terakhir ID) atau isi manual per model. Nomor urut dibuat otomatis dari posisi menggunakan **Pengaturan → Gaya penomoran** (mis. `01.`, `1.`, `001.`, `01 -`, atau `tanpa nomor`).
 9. **Preview** — daftar nama + blok konfigurasi ditampilkan untuk dicek sebelum disimpan.
-10. **Simpan** — mengikuti resolusi config milik OpenCode: pilih file pertama yang ada dari `opencode.jsonc` → `opencode.json` → `config.json` di dalam `~/.config/opencode` (atau `$OPENCODE_CONFIG_DIR` bila diatur), default `opencode.jsonc`. Backup `.bak` dibuat sebelum menyimpan; konfigurasi lain dipertahankan, tetapi komentar JSONC dan format asli tidak. Jika nama provider **sudah ada**, aplikasi memberi peringatan bahwa semua model lama di provider tersebut akan dihapus dan diganti dengan daftar saat ini.
+10. **Simpan** — mengikuti resolusi config milik OpenCode: pilih file pertama yang ada dari `opencode.jsonc` → `opencode.json` → `config.json` di dalam `~/.config/opencode` (atau `$OPENCODE_CONFIG_DIR` bila diatur), default `opencode.jsonc`. Dengan **Pengaturan → Penyimpanan kredensial = auth.json**, API key ditulis ke `~/.local/share/opencode/auth.json` (mode `0600`) dan `opencode.json` hanya menyimpan `baseURL`; dengan `opencode.json`, key ditulis inline seperti sebelumnya. Backup `.bak` dibuat sebelum menyimpan salah satu file; konfigurasi lain dipertahankan, tetapi komentar JSONC dan format asli tidak. Jika nama provider **sudah ada**, aplikasi memberi peringatan bahwa semua model lama di provider tersebut akan dihapus dan diganti dengan daftar saat ini.
 11. **Ulang** — setelah simpan/batal, aplikasi bertanya **Apakah ingin mengulang?** (`Jika ya, akan kembali ke menu utama.`). Jika **Ya**, loop kembali ke *Aksi awal*; jika **Tidak**, keluar.
 
 ## Pengaturan
@@ -97,8 +97,26 @@ Tersedia di menu utama → **Pengaturan** (tombol **Kembali** sengaja hijau):
   - `01 -` → `01 - model`, `02 - model`
   - `none` → `model` (tanpa prefix)
 - **Urutan** — cara mengurutkan model yang berfungsi sebelum disimpan: `Skor bawaan (coding)` (default) atau `Abjad (A-Z)`. Edit manual tetap tersedia setelah pengurutan.
+- **Penyimpanan kredensial** — `opencode auth.json` (default) menulis key ke `~/.local/share/opencode/auth.json` (mode `0600`); `opencode.json` menulis `options.apiKey` inline.
+- **Cek update** — `Aktif` secara default. Mengecek GitHub Releases setiap startup dan hanya menampilkan notifikasi bila ada versi lebih baru. Gunakan **Cek update** di menu utama untuk pengecekan manual beserta detail status/error.
 
 Pengaturan disimpan di `~/.config/opencode-model-picker/config.json` bersama provider tersimpan dan mendukung migrasi dari config lama.
+
+## Keamanan & Penyimpanan Kredensial
+
+- **Enkripsi config aplikasi** — `providers[].apiKey` di `~/.config/opencode-model-picker/config.json` otomatis disimpan sebagai blob `enc:v1:` (AES-256-GCM dengan kunci turunan user/mesin saat ini). Tidak ada password yang disimpan atau diminta. Config plaintext lama otomatis dienkripsi saat startup.
+- **Apa yang dilindungi** — mencegah token terbaca sekilas di file, backup, atau saat file dibagikan. Ini penyamaran yang terikat ke mesin/user saat ini, bukan proteksi terhadap pihak yang sudah punya akses ke akun tersebut. Menyalin config ke mesin lain membuat key tidak terbaca (masukkan ulang).
+- **Penyimpanan OpenCode tidak terenkripsi** — OpenCode butuh key plaintext saat runtime. `auth.json` berupa teks biasa dengan mode `0600`, dan key inline di `opencode.json` juga plaintext. Enkripsi hanya melindungi config picker.
+- **Format auth.json** — entri memakai `{ "provider-id": { "type": "api", "key": "..." } }`. Provider lain dan entri OAuth dipertahankan; backup `.bak` dibuat sebelum setiap penulisan. Jika sudah ada entri non-API untuk provider yang sama, aplikasi memberi peringatan sebelum menggantinya.
+- **Impor** — saat menambah provider, jika nama cocok dengan entri API di `auth.json`, aplikasi menawarkan untuk memakai key tersebut. Provider tersimpan juga bisa impor via *Kelola provider tersimpan → Impor key dari auth.json*.
+- **Catatan OpenCode v2** — build OpenCode terbaru memigrasikan kredensial `auth.json` lama ke database sekali. Jika build Anda tidak lagi membaca `auth.json` langsung, impor/login ulang lewat OpenCode setelah menyimpan.
+- **Upgrade dari build master-password** — jika config dibuat oleh build tersebut, aplikasi meminta password lama sekali saat startup, memigrasikan key ke enkripsi otomatis berbasis mesin, lalu tidak pernah memintanya lagi.
+
+## Cek Update
+
+- Setiap startup (kecuali dimatikan di Pengaturan), aplikasi menanyakan rilis GitHub terbaru di `https://github.com/junioriqfar/opencode-model-picker/releases/latest`.
+- Jika ada versi lebih baru, aplikasi menampilkan versi dan URL rilis — tidak pernah mengunduh atau mengganti file secara otomatis.
+- **Cek update** manual menampilkan status terbaru, tidak ada rilis, rate limit, timeout, dan error jaringan. Pengecekan otomatis tetap diam saat gagal.
 
 ## Varian (OpenCode Go)
 
@@ -120,8 +138,12 @@ src/
 ├── provider.js   # GET /v1/models + pemilihan endpoint (chat/messages/responses) + x-opencode-session Go + normalisasi capability + ekstrak inner error OpenRouter
 ├── go-models.js  # snapshot metadata OpenCode Go (models.dev) untuk varian otomatis
 ├── scoring.js    # skor otomatis kemampuan coding
-├── config.js     # simpan/muat config aplikasi (~/.config/opencode-model-picker/) + settings (language/timeout/numbering/sort)
+├── config.js     # config aplikasi + settings + enkripsi otomatis berbasis mesin
+├── crypto.js     # AES-256-GCM + HKDF (helper migrasi password lama)
+├── auth.js       # baca/tulis/backup/impor auth.json OpenCode
 ├── opencode.js   # merge aman ke config OpenCode (mendukung penomoran) + varian Go + backup .bak + atomic write
+├── update.js     # cek update GitHub Releases + perbandingan semver
+├── version.js    # sumber tunggal versi aplikasi
 └── utils.js      # path sesuai OpenCode, parser JSONC (komentar + trailing comma), atomic write
 
 scripts/
@@ -130,12 +152,17 @@ scripts/
 test/
 ├── utils.test.js     # parser JSONC + resolusi path config
 ├── provider.test.js  # pemilihan endpoint, header session, klasifikasi error
-└── opencode.test.js  # blok model/npm + varian Go + backup/atomic write
+├── opencode.test.js  # blok model/npm + varian Go + backup/atomic write
+├── config.test.js    # settings, atomic save, enkripsi otomatis + migrasi legacy
+├── crypto.test.js    # round-trip enkripsi, machine key, deteksi tamper
+├── auth.test.js      # path/tulis/backup/impor/rename auth.json
+├── update.test.js    # perbandingan semver + penanganan GitHub API
+└── version.test.js   # VERSION sama dengan package.json
 ```
 
 ## Catatan
 
-- Config aplikasi (provider tersimpan + pengaturan) disimpan di `~/.config/opencode-model-picker/config.json` (API key plain text — jaga file ini).
+- Config aplikasi (provider tersimpan + pengaturan) disimpan di `~/.config/opencode-model-picker/config.json`; API key dienkripsi otomatis dengan kunci berbasis mesin.
 - Path config OpenCode mengikuti OpenCode sendiri: `~/.config/opencode` di semua platform (termasuk Windows, via XDG), atau `$OPENCODE_CONFIG_DIR` bila diatur. Tool membaca JSONC dengan komentar dan trailing comma.
 - Backup `.bak` dibuat di sebelah config OpenCode setiap kali menyimpan, karena file ditulis ulang sebagai JSON biasa (komentar/format tidak dipertahankan).
 - Untuk provider campuran protokol, `npm` level provider diisi paket endpoint **mayoritas** (`@ai-sdk/openai-compatible` / `@ai-sdk/anthropic` / `@ai-sdk/openai`) dan model minoritas diberi override `provider.npm` per-model, sehingga sesedikit mungkin bergantung pada override per-model.

@@ -1,5 +1,5 @@
 import { homedir } from 'node:os'
-import { mkdirSync, existsSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs'
+import { chmodSync, mkdirSync, existsSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 
 export const APP_NAME = 'opencode-model-picker'
@@ -14,9 +14,22 @@ export function appConfigPath() {
 }
 
 export function ensureConfigDir() {
-  const dir = configDir()
+  return ensureDir(configDir())
+}
+
+export function ensureDir(dir) {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   return dir
+}
+
+// Ikuti Global.Path.data milik opencode: XDG data dir + "opencode".
+export function opencodeDataDir() {
+  const base = process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share')
+  return join(base, 'opencode')
+}
+
+export function opencodeAuthPath() {
+  return join(opencodeDataDir(), 'auth.json')
 }
 
 // Ikuti perilaku opencode: config global ada di xdgConfig/opencode, dan
@@ -151,16 +164,21 @@ export function readFileSafe(path) {
   }
 }
 
-export function writeFileAtomic(path, content) {
+export function writeFileAtomic(path, content, { mode } = {}) {
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}`
-  writeFileSync(tmp, content, 'utf8')
+  writeFileSync(tmp, content, { encoding: 'utf8', mode })
   try {
     renameSync(tmp, path)
   } catch {
     // Windows: rename ke file yang sudah ada bisa gagal -> fallback tulis langsung.
-    writeFileSync(path, content, 'utf8')
+    writeFileSync(path, content, { encoding: 'utf8', mode })
     try {
       unlinkSync(tmp)
+    } catch {}
+  }
+  if (mode !== undefined) {
+    try {
+      chmodSync(path, mode)
     } catch {}
   }
 }

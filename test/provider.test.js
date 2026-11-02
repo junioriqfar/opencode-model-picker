@@ -42,6 +42,9 @@ test('guessApi infers endpoint without any request', () => {
 test('isOpencodeZen detects Go/Zen hosts', () => {
   assert.equal(isOpencodeZen(GO), true)
   assert.equal(isOpencodeZen('https://opencode.ai/zen/v1'), true)
+  assert.equal(isOpencodeZen('https://opencode.ai/zen'), true)
+  assert.equal(isOpencodeZen('https://opencode.ai/go'), true)
+  assert.equal(isOpencodeZen('https://opencode.ai/go/v1'), true)
   assert.equal(isOpencodeZen(OPENAI), false)
   assert.equal(isOpencodeZen(ANTHROPIC), false)
 })
@@ -141,6 +144,68 @@ test('dead model does not trigger endpoint fallback', async () => {
   )
   assert.equal(result.error, 'notfound')
   assert.equal(count, 1)
+})
+
+test('Go fallback stops on non-fallback error at a later endpoint', async () => {
+  const calls = []
+  const result = await withFetch(
+    async (url) => {
+      calls.push(url)
+      if (url.endsWith('/messages')) {
+        return jsonRes(400, { error: { message: 'InvalidRequest wrong endpoint' } })
+      }
+      if (url.endsWith('/chat/completions')) {
+        return jsonRes(401, { error: { message: 'Unauthorized' } })
+      }
+      return jsonRes(500, { error: { message: 'unexpected endpoint' } })
+    },
+    () => testModel({ baseURL: GO, apiKey: 'k', model: 'minimax-m3', timeoutMs: 3000, lang: 'en' }),
+  )
+  assert.equal(result.error, 'auth')
+  assert.equal(result.dead, true)
+  assert.equal(calls.length, 2, 'stops after auth on the second endpoint')
+})
+
+test('401 with not-found text is classified as auth, not a dead model', async () => {
+  const result = await withFetch(
+    async () => jsonRes(401, { error: { message: 'Model not found for this key' } }),
+    () => testModel({ baseURL: OPENAI, apiKey: 'k', model: 'gpt-4o', timeoutMs: 3000, lang: 'en' }),
+  )
+  assert.equal(result.error, 'auth')
+  assert.equal(result.dead, true)
+})
+
+test('429 stays temporary even when the body mentions not found', async () => {
+  const result = await withFetch(
+    async () => jsonRes(429, { error: { message: 'Rate limit: model not found in cache' } }),
+    () =>
+      testModel({
+        baseURL: OPENAI,
+        apiKey: 'k',
+        model: 'gpt-4o',
+        timeoutMs: 3000,
+        lang: 'en',
+        retryOn429: false,
+      }),
+  )
+  assert.equal(result.error, 'ratelimit')
+  assert.equal(result.dead, false)
+})
+
+test('empty response message follows the selected language', async () => {
+  const en = await withFetch(
+    async () => jsonRes(200, {}),
+    () => testModel({ baseURL: OPENAI, apiKey: 'k', model: 'gpt-4o', timeoutMs: 3000, lang: 'en' }),
+  )
+  assert.match(en.message, /Empty response/)
+  assert.equal(en.ok, true)
+  assert.equal(en.warning, true)
+
+  const id = await withFetch(
+    async () => jsonRes(200, {}),
+    () => testModel({ baseURL: OPENAI, apiKey: 'k', model: 'gpt-4o', timeoutMs: 3000, lang: 'id' }),
+  )
+  assert.match(id.message, /Respons kosong/)
 })
 
 test('chat retries with max_completion_tokens when max_tokens unsupported', async () => {
